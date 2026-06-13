@@ -1,59 +1,21 @@
-"""
-app.py — Rail-Flow AI Flask backend
-"""
-
 import os
 import random
-from datetime import datetime, timedelta
+import networkx as nx
+from datetime import datetime
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from models import db, Station, StationAlias, CorridorEdge, TrainLocation
+from sqlalchemy.orm import joinedload
 from graph_logic import RailGraph
 from disruption_engine import propagate_downstream, predict_ripple, mock_delay_history
-
-def _generate_mock_trains():
-    """Generates localized telemetry over production station keys for live demo simulation UI."""
-    sample_stations = Station.query.limit(20).all()
-    if not sample_stations:
-        return []
-    
-    train_names = ["Rajdhani Express", "Shatabdi Express", "Duronto Express", "Vande Bharat"]
-    trains = []
-    for i, s in enumerate(sample_stations):
-        t = TrainLocation(
-            train_id=12301 + i,
-            train_name=random.choice(train_names),
-            current_station=s.id,
-            delay_minutes=random.choice([0, 5, 15, 45]),
-            speed_kmh=round(random.uniform(50, 120), 1),
-            last_updated=datetime.utcnow()
-        )
-        db.session.add(t)
-        trains.append(t)
-    db.session.commit()
-    return trains
 
 def create_app(config=None):
     app = Flask(__name__)
     CORS(app)
-
-    # Standard Localhost Environment Pointer targeting your production database container
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
-        "DATABASE_URL",
-        "postgresql://postgres:201810@localhost:5432/rail_digital_twin"
-    )
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "postgresql://postgres:201810@localhost:5432/rail_digital_twin")
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
-    if config:
-        app.config.update(config)
-
     db.init_app(app)
 
-    # Protected Instance Initializer (Skips db.create_all() to defend populated data rows)
-    with app.app_context():
-        pass
-
-    # Build active graph matrix memory layers
     rail_graph = RailGraph()
     with app.app_context():
         rail_graph.build_from_db()
@@ -61,138 +23,121 @@ def create_app(config=None):
     def resolve_station(code: str):
         code = code.strip().upper()
         station = Station.query.get(code)
-        if station:
-            return station
+        if station: return station
         alias = StationAlias.query.filter(db.func.upper(StationAlias.alias_code) == code).first()
         return alias.station if alias else None
 
-    # ── Routes ────────────────────────────────────────────────────────────────
-
     @app.route("/api/stations", methods=["GET"])
     def get_stations():
-        stations = Station.query.order_by(Station.id).all()
-        return jsonify({"count": len(stations), "stations": [s.to_dict() for s in stations]})
+        stations = Station.query.options(joinedload(Station.aliases)).all()
+        return jsonify({"stations": [s.to_dict() for s in stations]})
 
     @app.route("/api/station-lookup/<code_input>", methods=["GET"])
     def station_lookup(code_input):
         station = resolve_station(code_input)
-        if not station:
-            return jsonify({"error": f"No station found for code '{code_input.upper()}'."}), 404
-        return jsonify(station.to_dict())
+        return jsonify(station.to_dict()) if station else (jsonify({"error": "Not found"}), 404)
+
+    @app.route("/api/graph", methods=["GET"])
+    def get_graph():
+        # Only return core backbone and hub stations to avoid visual clutter and browser lag
+        stations = Station.query.filter(Station.state.isnot(None)).options(joinedload(Station.aliases)).all()
+        core_ids = {s.id for s in stations}
+        connections = CorridorEdge.query.filter(
+            CorridorEdge.from_station_id.in_(core_ids),
+            CorridorEdge.to_station_id.in_(core_ids)
+        ).all()
+        G = nx.Graph()
+        for s in stations: G.add_node(s.id)
+        for e in connections: G.add_edge(e.from_station_id, e.to_station_id)
+        pos = nx.random_layout(G, seed=42) 
+        
+        nodes = [{"data": s.to_dict(), "position": {'x': float(pos[s.id][0]*1000), 'y': float(pos[s.id][1]*1000)}} for s in stations]
+        edges = [{"data": {"id": f"e{e.edge_id}", "source": e.from_station_id, "target": e.to_station_id}} for e in connections]
+        return jsonify({"elements": {"nodes": nodes, "edges": edges}})
 
     @app.route("/api/trains", methods=["GET"])
-    def get_all_trains():
-        trains = TrainLocation.query.all()
-        if not trains:
-            trains = _generate_mock_trains()
-        return jsonify({
-            "header": {
-                "gtfs_realtime_version": "2.0",
-                "timestamp": datetime.utcnow().isoformat(),
-                "incrementality": "FULL_DATASET"
-            },
-            "entity": [t.to_dict() for t in trains]
-        })
+    def get_trains():
+        return jsonify({"entity": [t.to_dict() for t in TrainLocation.query.all()]})
 
-    @app.route("/api/trains/<train_id>", methods=["GET"])
-    def get_train(train_id):
-        train = TrainLocation.query.get(int(train_id))
-        if not train:
-            return jsonify({"error": f"Train '{train_id}' not found."}), 404
-        return jsonify(train.to_dict())
-
-    @app.route("/api/station/<station_id>/status", methods=["POST"])
-    def update_station_status(station_id):
-        station = resolve_station(station_id)
+    @app.route("/api/station/<id>/status", methods=["POST"])
+    def update_station_status(id):
+        station = resolve_station(id)
         if not station:
-            return jsonify({"error": "Station not found."}), 404
-        body = request.get_json(silent=True) or {}
-        new_status = body.get("status", "clear").lower()
-        if new_status not in ("clear", "congestion", "delayed"):
-            return jsonify({"error": "status must be clear | congestion | delayed"}), 400
+            return jsonify({"error": "Station not found"}), 404
+        data = request.get_json() or {}
+        new_status = data.get("status")
+        if new_status not in ["clear", "congestion", "delayed"]:
+            return jsonify({"error": "Invalid status"}), 400
         station.status = new_status
         db.session.commit()
         rail_graph.refresh_edge_costs()
         return jsonify({"updated": station.to_dict()})
 
-    @app.route("/api/graph", methods=["GET"])
-    def get_graph():
-        nodes = [{"data": s.to_dict()} for s in Station.query.all()]
-        edges = []
-        for e in CorridorEdge.query.all():
-            edges.append({
-                "data": {
-                    "id": f"e{e.edge_id}",
-                    "source": e.from_station_id,
-                    "target": e.to_station_id,
-                    "base_time": float(e.base_time_min or 60.0),
-                    "dynamic_cost": e.dynamic_cost,
-                }
-            })
-        return jsonify({"elements": {"nodes": nodes, "edges": edges}})
-
-    @app.route("/api/disruption/inject", methods=["POST"])
-    def inject_disruption():
-        body = request.get_json(silent=True) or {}
-        station_id = body.get("station_id", "")
-        depth = int(body.get("depth", 3))
-        station = resolve_station(station_id)
+    @app.route("/api/analytics/delay-history/<id>", methods=["GET"])
+    def get_delay_history(id):
+        station = resolve_station(id)
         if not station:
-            return jsonify({"error": "Station not found."}), 404
-        station.status = "delayed"
-        db.session.commit()
-        rail_graph.refresh_edge_costs()
-        impacted, hop_map = propagate_downstream(rail_graph, station.id, depth)
-        return jsonify({
-            "source": station.to_dict(),
-            "depth": depth,
-            "impacted_count": len(impacted),
-            "impacted_nodes": [{"id": nid, "hop": hop_map[nid]} for nid in sorted(impacted, key=lambda x: hop_map[x])],
-        })
+            return jsonify({"error": "Station not found"}), 404
+        return jsonify(mock_delay_history(station.id))
 
-    @app.route("/api/predict/ripple/<code_input>", methods=["GET"])
-    def predict_ripple_route(code_input):
-        station = resolve_station(code_input)
+    @app.route("/api/predict/ripple/<id>", methods=["GET"])
+    def get_ripple_prediction(id):
+        station = resolve_station(id)
         if not station:
-            return jsonify({"error": f"Station '{code_input}' not found."}), 404
+            return jsonify({"error": "Station not found"}), 404
         depth = int(request.args.get("depth", 3))
         return jsonify(predict_ripple(rail_graph, station, depth))
 
-    @app.route("/api/analytics/delay-history/<code_input>", methods=["GET"])
-    def delay_history(code_input):
-        station = resolve_station(code_input)
-        if not station:
-            return jsonify({"error": f"Station '{code_input}' not found."}), 404
-        return jsonify(mock_delay_history(station.id))
-
     @app.route("/api/path", methods=["GET"])
     def find_path():
-        from_code = request.args.get("from", "")
-        to_code = request.args.get("to", "")
-        origin = resolve_station(from_code)
-        destination = resolve_station(to_code)
+        origin = resolve_station(request.args.get("from", ""))
+        destination = resolve_station(request.args.get("to", ""))
         if not origin or not destination:
-            return jsonify({"error": "Invalid origin or destination codes."}), 404
-        
-        path, total_cost = rail_graph.astar(origin.id, destination.id)
-        if path is None:
-            return jsonify({"error": "No path found between selected coordinates."}), 404
+            return jsonify({"error": "Invalid origin or destination station"}), 404
+        path, cost = rail_graph.astar(origin.id, destination.id)
+        if not path:
+            return jsonify({"error": "No path found between selected stations"}), 404
             
-        path_details = []
-        for node_id in path:
-            s = Station.query.get(node_id)
-            if s:
-                path_details.append({"id": s.id, "name": s.name, "status": s.status})
-        return jsonify({
-            "from": origin.id,
-            "to": destination.id,
-            "hops": len(path) - 1,
-            "total_cost": round(total_cost, 1),
-            "path": path_details,
-        })
+        path_nodes = []
+        disrupted_nodes = []
+        for nid in path:
+            station = Station.query.get(nid)
+            status = station.status if station else "clear"
+            if status != "clear":
+                disrupted_nodes.append(nid)
+            path_nodes.append({
+                "id": nid,
+                "name": station.name if station else nid,
+                "status": status
+            })
+            
+        response_data = {
+            "path": path_nodes,
+            "total_cost": round(cost, 2),
+            "hops": len(path) - 1
+        }
+
+        # If any station along the path is disrupted, compute a bypass path
+        if disrupted_nodes:
+            bypass_path, bypass_cost = rail_graph.astar(origin.id, destination.id, avoid_nodes=set(disrupted_nodes))
+            if bypass_path:
+                bypass_nodes = []
+                for nid in bypass_path:
+                    station = Station.query.get(nid)
+                    bypass_nodes.append({
+                        "id": nid,
+                        "name": station.name if station else nid,
+                        "status": station.status if station else "clear"
+                    })
+                response_data["alternative_path"] = bypass_nodes
+                response_data["alternative_cost"] = round(bypass_cost, 2)
+                response_data["disrupted_stations"] = [
+                    (Station.query.get(nid).name or nid) for nid in disrupted_nodes
+                ]
+
+        return jsonify(response_data)
 
     return app
 
 if __name__ == "__main__":
-    app = create_app()
-    app.run(debug=True, port=5000)
+    create_app().run(debug=True, port=5000)

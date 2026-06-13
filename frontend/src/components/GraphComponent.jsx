@@ -1,27 +1,9 @@
-// GraphComponent.jsx — Interactive cytoscape layer driven by NetworkContext
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import CytoscapeComponent from 'react-cytoscapejs';
-import cytoscape from 'cytoscape';
-import cola from 'cytoscape-cola';
 import { useNetwork } from '../context/NetworkContext';
+import { STATUS_COLORS, DISRUPTION_COLORS } from '../constants/colors';
 
-cytoscape.use(cola);
-
-export const STATUS_COLORS = {
-  clear: '#22c55e',
-  congestion: '#eab308',
-  delayed: '#ef4444',
-};
-
-export const DISRUPTION_COLORS = {
-  source: '#ef4444',
-  impacted: '#f97316',
-};
-
-const LAYER_BORDER = {
-  corridor: '#6366f1',
-  hub: '#f97316',
-};
+const LAYER_BORDER = { corridor: '#6366f1', hub: '#f97316' };
 
 const CY_STYLE = [
   {
@@ -39,34 +21,20 @@ const CY_STYLE = [
       color: '#fff',
       'text-outline-color': '#1e293b',
       'text-outline-width': 1,
-      'transition-property': 'background-color, border-color',
-      'transition-duration': '0.3s',
+      'cursor': 'pointer',
     },
   },
   {
     selector: 'node.disruption-source',
-    style: {
-      'background-color': DISRUPTION_COLORS.source,
-      'border-color': '#fca5a5',
-      'border-width': 3,
-    },
+    style: { 'background-color': DISRUPTION_COLORS.source, 'border-color': '#fca5a5', 'border-width': 3 },
   },
   {
     selector: 'node.disruption-impacted',
-    style: {
-      'background-color': DISRUPTION_COLORS.impacted,
-      'border-color': '#fdba74',
-      'border-width': 3,
-    },
+    style: { 'background-color': DISRUPTION_COLORS.impacted, 'border-color': '#fdba74', 'border-width': 3 },
   },
   {
-    selector: 'node:selected',
-    style: {
-      'border-width': 4,
-      'border-color': '#fff',
-      'overlay-color': '#fff',
-      'overlay-opacity': 0.15,
-    },
+    selector: 'node.highlight',
+    style: { 'border-width': 4, 'border-color': '#fbbf24', 'z-index': 999 },
   },
   {
     selector: 'edge',
@@ -74,203 +42,131 @@ const CY_STYLE = [
       width: 1.5,
       'line-color': '#475569',
       'target-arrow-shape': 'triangle',
-      'target-arrow-color': '#475569',
       'curve-style': 'bezier',
       opacity: 0.5,
     },
   },
   {
-    selector: 'edge.ripple-edge',
-    style: {
-      width: 2.5,
-      'line-color': '#f97316',
-      'target-arrow-color': '#f97316',
-      opacity: 0.85,
-    },
+    selector: 'edge.highlight',
+    style: { width: 3, 'line-color': '#fbbf24', opacity: 1, 'z-index': 999 },
   },
   {
-    selector: 'edge.highlighted-path',
-    style: {
-      width: 3,
-      'line-color': '#f59e0b',
-      'target-arrow-color': '#f59e0b',
-      opacity: 1,
-    },
+    selector: 'node.detour-highlight',
+    style: { 'border-width': 4, 'border-color': '#10b981', 'z-index': 999 },
   },
   {
-    selector: 'node.on-path',
-    style: {
-      'border-width': 4,
-      'border-color': '#f59e0b',
-    },
+    selector: 'edge.detour-highlight',
+    style: { width: 3, 'line-color': '#10b981', opacity: 1, 'z-index': 999 },
   },
 ];
 
-export default function GraphComponent({
-  highlightPath = null,
-  onNodeSelect,
-  className = '',
-  showLegend = true,
-}) {
+export default function GraphComponent({ highlightPath = null, alternativePath = null, className = '', onNodeSelect = null }) {
   const cyRef = useRef(null);
-  const layoutConfig = useRef({
-    name: 'cola',
-    animate: true,
-    animationDuration: 800,
-    nodeSpacing: 5,
-    edgeLengthVal: 60,
-    maxSimulationTime: 3000,
-  });
-
-  const {
-    graphData,
-    isLoading,
-    delayedNodeIds,
-    impactedNodeIds,
-    impactHopMap,
-    selectedNodeId,
-    setSelectedNodeId,
-    disruptionRevision,
-  } = useNetwork();
-
-  const [stats, setStats] = useState({ total: 0, delayed: 0, congestion: 0, impacted: 0 });
+  const { graphData, isLoading, error, delayedNodeIds, impactedNodeIds, disruptionRevision, selectedNodeId } = useNetwork();
 
   const elements = useMemo(() => {
     if (!graphData?.elements) return [];
-    const nodes = graphData.elements.nodes.map(n => ({
-      data: {
-        ...n.data,
-        label: n.data.label,
-        statusColor: STATUS_COLORS[n.data.status] ?? '#94a3b8',
-        layerColor: LAYER_BORDER[n.data.layer] ?? '#94a3b8',
-        nodeSize: n.data.layer === 'hub' ? 16 : 10,
+    return graphData.elements.nodes.map(n => ({
+      data: { 
+        ...n.data, 
+        label: n.data.label || n.data.name || n.data.id || '',
+        statusColor: STATUS_COLORS[n.data.status] ?? '#94a3b8', 
+        layerColor: LAYER_BORDER[n.data.layer] ?? '#94a3b8', 
+        nodeSize: n.data.layer === 'hub' ? 16 : 10 
       },
-    }));
-    return [...nodes, ...graphData.elements.edges];
+      position: n.position || n.data.position
+    })).concat(graphData.elements.edges);
   }, [graphData]);
 
-  // Apply disruption styling when delayed/impacted sets change
-  const applyDisruptionStyles = useCallback(() => {
+  useEffect(() => {
     const cy = cyRef.current;
-    if (!cy || !cy.nodes) return;
-
+    if (!cy) return;
+    
     cy.batch(() => {
-      cy.nodes().removeClass('disruption-source disruption-impacted on-path');
-      cy.edges().removeClass('ripple-edge highlighted-path');
-
-      cy.nodes().forEach(node => {
-        const id = node.id();
-        const baseStatus = node.data('status');
-        if (delayedNodeIds.includes(id)) {
-          node.addClass('disruption-source');
-        } else if (impactedNodeIds.includes(id)) {
-          node.addClass('disruption-impacted');
-        } else {
-          node.data('statusColor', STATUS_COLORS[baseStatus] ?? '#94a3b8');
-        }
-      });
-
-      // Highlight ripple edges (source → impacted)
-      for (const impactedId of impactedNodeIds) {
-        for (const sourceId of delayedNodeIds) {
-          cy.edges(`[source="${sourceId}"][target="${impactedId}"]`).addClass('ripple-edge');
-        }
-        const hop = impactHopMap[impactedId];
-        if (hop > 1) {
-          for (const sourceId of impactedNodeIds) {
-            if (impactHopMap[sourceId] === hop - 1) {
-              cy.edges(`[source="${sourceId}"][target="${impactedId}"]`).addClass('ripple-edge');
-            }
-          }
-        }
-      }
-
-      if (highlightPath?.length) {
-        highlightPath.forEach(id => cy.getElementById(id).addClass('on-path'));
+      // Clear previous styles
+      cy.elements().removeClass('disruption-source disruption-impacted highlight detour-highlight');
+      
+      // Apply Disruption
+      delayedNodeIds.forEach(id => cy.getElementById(id)?.addClass('disruption-source'));
+      impactedNodeIds.forEach(id => cy.getElementById(id)?.addClass('disruption-impacted'));
+      
+      // Apply Path Highlight
+      if (highlightPath && highlightPath.length > 0) {
+        highlightPath.forEach(id => cy.getElementById(id)?.addClass('highlight'));
         for (let i = 0; i < highlightPath.length - 1; i++) {
-          cy.edges(
-            `[source="${highlightPath[i]}"][target="${highlightPath[i + 1]}"]`
-          ).addClass('highlighted-path');
+          const edge = cy.edges(`[source="${highlightPath[i]}"][target="${highlightPath[i+1]}"]`);
+          edge.addClass('highlight');
+        }
+      }
+
+      // Apply Detour Path Highlight
+      if (alternativePath && alternativePath.length > 0) {
+        alternativePath.forEach(id => cy.getElementById(id)?.addClass('detour-highlight'));
+        for (let i = 0; i < alternativePath.length - 1; i++) {
+          const edge = cy.edges(`[source="${alternativePath[i]}"][target="${alternativePath[i+1]}"]`);
+          edge.addClass('detour-highlight');
         }
       }
     });
-
-    setStats({
-      total: cy.nodes().length,
-      delayed: delayedNodeIds.length,
-      congestion: cy.nodes().filter(n => n.data('status') === 'congestion').length,
-      impacted: impactedNodeIds.length,
-    });
-  }, [delayedNodeIds, impactedNodeIds, impactHopMap, highlightPath]);
+  }, [delayedNodeIds, impactedNodeIds, disruptionRevision, highlightPath, alternativePath]);
 
   useEffect(() => {
-    applyDisruptionStyles();
-  }, [applyDisruptionStyles, disruptionRevision, elements]);
+    const cy = cyRef.current;
+    if (!cy) return;
+    if (highlightPath && highlightPath.length > 0) {
+      cy.animate({
+        fit: { eles: cy.elements('.highlight, .detour-highlight'), padding: 50 },
+        duration: 500
+      });
+    } else {
+      cy.animate({
+        fit: { eles: cy.elements(), padding: 30 },
+        duration: 500
+      });
+    }
+  }, [highlightPath]);
 
-  // Pan to selected node
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy || !selectedNodeId) return;
     const node = cy.getElementById(selectedNodeId);
-    if (node.length) {
-      cy.animate({ center: { eles: node }, zoom: 2.5 }, { duration: 500 });
-      cy.elements().unselect();
-      node.select();
+    if (node.length > 0) {
+      cy.animate({
+        center: { eles: node },
+        zoom: 2.5,
+        duration: 500
+      });
+      // Apply temporal highlight to focused node
+      node.addClass('highlight');
     }
   }, [selectedNodeId]);
 
-  const onCyReady = useCallback((cy) => {
-    cyRef.current = cy;
-    cy.on('tap', 'node', (evt) => {
-      const data = evt.target.data();
-      setSelectedNodeId(data.id);
-      onNodeSelect?.(data);
-    });
-    cy.on('tap', (evt) => {
-      if (evt.target === cy) onNodeSelect?.(null);
-    });
-  }, [setSelectedNodeId, onNodeSelect]);
-
-  if (isLoading) {
-    return <div className="graph-loading">Loading network graph…</div>;
-  }
-
-  if (!elements.length) {
-    return <div className="graph-error">No graph data — is the Flask server running?</div>;
-  }
+  if (isLoading) return <div className="graph-loading">Loading network graph…</div>;
+  if (error) return <div className="graph-error">Failed to load graph: {error}</div>;
 
   return (
     <div className={`graph-container ${className}`}>
-      {showLegend && (
-        <div className="graph-legend">
-          <LegendDot color={STATUS_COLORS.clear} label="Clear" />
-          <LegendDot color={STATUS_COLORS.congestion} label="Congestion" />
-          <LegendDot color={DISRUPTION_COLORS.source} label="Delayed (injected)" />
-          <LegendDot color={DISRUPTION_COLORS.impacted} label="Ripple impact" />
-        </div>
-      )}
-      <div className="graph-stats-bar">
-        <span>{stats.total} nodes</span>
-        <span className="stat-delayed">{stats.delayed} delayed</span>
-        <span className="stat-impacted">{stats.impacted} impacted</span>
-      </div>
       <CytoscapeComponent
         elements={elements}
         style={{ width: '100%', height: '100%' }}
         stylesheet={CY_STYLE}
-        layout={layoutConfig.current}
-        cy={onCyReady}
-        wheelSensitivity={0.3}
+        layout={{ name: 'preset' }}
+        cy={(cy) => {
+          cyRef.current = cy;
+          cy.off('tap', 'node');
+          cy.on('tap', 'node', (evt) => {
+            const node = evt.target;
+            if (onNodeSelect) {
+              onNodeSelect({
+                id: node.id(),
+                label: node.data('name') || node.id(),
+                status: node.data('status'),
+                layer: node.data('layer'),
+              });
+            }
+          });
+        }}
       />
     </div>
-  );
-}
-
-function LegendDot({ color, label }) {
-  return (
-    <span className="legend-item">
-      <span className="legend-dot" style={{ background: color }} />
-      {label}
-    </span>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNetwork } from '../context/NetworkContext';
-import { DISRUPTION_COLORS } from './GraphComponent';
+import { STATUS_COLORS, DISRUPTION_COLORS } from '../constants/colors';
 
 function getRipplePercent(prediction) {
   if (!prediction) return 0;

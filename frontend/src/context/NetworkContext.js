@@ -34,6 +34,7 @@ export const NetworkProvider = ({ children }) => {
   const [stationReport, setStationReport] = useState(null);
   const [ripplePrediction, setRipplePrediction] = useState(null);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const adjacencyRef = useRef(new Map());
 
@@ -42,6 +43,7 @@ export const NetworkProvider = ({ children }) => {
   }, []);
 
   const fetchGraph = useCallback(async () => {
+    setError(null);
     const response = await fetch(`${API}/graph`);
     if (!response.ok) throw new Error('Failed to fetch graph');
     const data = await response.json();
@@ -68,8 +70,9 @@ export const NetworkProvider = ({ children }) => {
       try {
         await fetchGraph();
         await fetchTrains();
-      } catch (error) {
-        console.error('Failed to fetch network data:', error);
+      } catch (err) {
+        console.error('Failed to fetch network data:', err);
+        setError(err.message || 'Failed to connect to backend server');
       } finally {
         setIsLoading(false);
       }
@@ -223,6 +226,7 @@ export const NetworkProvider = ({ children }) => {
     trainStatus,
     networkHealth,
     isLoading,
+    error,
     selectedNodeId,
     setSelectedNodeId,
     fetchGraph,

@@ -76,6 +76,12 @@ Inject the operational dynamic status constraint flag required by the pathfindin
 psql -U postgres -d rail_digital_twin -c "ALTER TABLE public.stations ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'clear';"
 ```
 
+### 1e. Apply Metadata Schema Migration & Backfill
+From the `backend/` directory, run the Python migration script to add missing metadata columns (`state`, `division`, `zone`, `category`, and `layer`) to the PostgreSQL `stations` table and backfill core station records:
+```cmd
+.venv\Scripts\python migration.py
+```
+
 ---
 
 ## Step 2 — Backend Setup (Flask)
@@ -144,11 +150,11 @@ Open your browser and test these URLs:
 
 | URL | Expected result |
 |-----|----------------|
-| `http://localhost:3000` | Graph UI loads with 781 nodes |
-| `http://localhost:5000/api/stations` | JSON list of all 781 stations |
-| `http://localhost:5000/api/station-lookup/HWH` | Howrah station details |
-| `http://localhost:5000/api/trains` | Mock train telemetry mapping layers |
-| `http://localhost:5000/api/path?from=C019&to=C022` | A* path parsing dynamic connection costs |
+| `http://localhost:3000` | Graph UI loads with 456 core nodes (clutter-free & lag-free) |
+| `http://localhost:5000/api/stations` | JSON list of all 4,447 stations |
+| `http://localhost:5000/api/station-lookup/HWH` | Howrah station details (including State, Zone, etc. from DB) |
+| `http://localhost:5000/api/trains` | Live train telemetry |
+| `http://localhost:5000/api/path?from=TMZ&to=ADTP` | A* path calculation with detour bypass recommendations |
 
 ---
 
@@ -189,13 +195,14 @@ npm start
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/stations` | All 781 mapped digital twin network stations |
+| GET | `/api/stations` | All 4,447 mapped digital twin network stations |
 | GET | `/api/station-lookup/<code>` | Single station matching lookup targets across native and alias nodes |
-| GET | `/api/trains` | Live real-time active train trajectory mappings |
-| GET | `/api/trains/<id>` | Single train track telemetry by identification numbers |
-| POST | `/api/station/<id>/status` | Body: `{"status":"clear"}` — Updates node color state and path tracking cost caches |
-| GET | `/api/graph` | Full network architecture output mapped for Cytoscape renderer parsing |
-| GET | `/api/path?from=X&to=Y` | A* path calculations across complex delay metric configurations |
+| GET | `/api/trains` | Live active train telemetry |
+| POST | `/api/station/<id>/status` | Body: `{"status":"clear"}` — Updates node status and dynamic routing costs in DB |
+| GET | `/api/graph` | Clutter-free network architecture (456 core stations) for Cytoscape rendering |
+| GET | `/api/path?from=X&to=Y` | A* path and alternative detour bypass calculations |
+| GET | `/api/analytics/delay-history/<code>` | Historical delay patterns for analysis |
+| GET | `/api/predict/ripple/<code>` | BFS delay cascade propagation prediction |
 
 ---
 

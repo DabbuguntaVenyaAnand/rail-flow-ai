@@ -5,8 +5,15 @@ import DisruptionPanel from '../components/DisruptionPanel';
 import StationSearchReport from '../components/StationSearchReport';
 
 export default function Dashboard() {
-  const { isLoading, selectedNodeId } = useNetwork();
+  const { isLoading, selectedNodeId, searchStation } = useNetwork();
   const [clickedNode, setClickedNode] = useState(null);
+
+  const handleNodeSelect = (node) => {
+    setClickedNode(node);
+    if (node?.id) {
+      searchStation(node.id);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -50,7 +57,7 @@ export default function Dashboard() {
         </aside>
 
         <section className="dashboard-graph">
-          <GraphComponent onNodeSelect={setClickedNode} />
+          <GraphComponent onNodeSelect={handleNodeSelect} />
         </section>
       </div>
     </div>

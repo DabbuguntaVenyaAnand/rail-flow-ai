@@ -10,6 +10,8 @@ export function buildAdjacency(edges = []) {
     const { source, target } = edge.data;
     if (!adj.has(source)) adj.set(source, []);
     adj.get(source).push(target);
+    if (!adj.has(target)) adj.set(target, []);
+    adj.get(target).push(source);
   }
   return adj;
 }

@@ -10,6 +10,10 @@ CREATE TABLE IF NOT EXISTS public.stations (
     station_code  VARCHAR(20)  NOT NULL PRIMARY KEY,
     station_name  VARCHAR(100) NOT NULL,
     state         VARCHAR(60),
+    division      VARCHAR(30),
+    zone          VARCHAR(30),
+    category      VARCHAR(20),
+    layer         VARCHAR(20)  NOT NULL DEFAULT 'corridor',
     status        VARCHAR(20)  NOT NULL DEFAULT 'clear',
     CONSTRAINT chk_status CHECK (status IN ('clear', 'congestion', 'delayed'))
 );

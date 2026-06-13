@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNetwork } from '../context/NetworkContext';
-import { STATUS_COLORS } from './GraphComponent';
+import { STATUS_COLORS } from '../constants/colors';
+import TacticalMapModal from './TacticalMapModal';
 
 export default function StationSearchReport() {
-  const { searchStation, stationReport, searchLoading, setSelectedNodeId, injectDelay } = useNetwork();
+  const { searchStation, stationReport, searchLoading, setSelectedNodeId, injectDelay, graphData } = useNetwork();
   const [query, setQuery] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -16,6 +18,57 @@ export default function StationSearchReport() {
     if (!stationReport?.station) return;
     await injectDelay(stationReport.station.id);
   };
+
+  // Compute local ego-graph for the searched station
+  const tacticalElements = useMemo(() => {
+    if (!stationReport?.station || !graphData?.elements) return [];
+    
+    const focusId = stationReport.station.id;
+    const neighborIds = new Set();
+    
+    // Gather all direct neighbors connected to focusId
+    graphData.elements.edges.forEach(e => {
+      if (e.data.source === focusId) neighborIds.add(e.data.target);
+      if (e.data.target === focusId) neighborIds.add(e.data.source);
+    });
+    
+    // Nodes to display: focus station + neighbors
+    const filteredNodes = graphData.elements.nodes.filter(
+      n => n.data.id === focusId || neighborIds.has(n.data.id)
+    );
+    
+    const nodes = filteredNodes.map(n => {
+      const isFocus = n.data.id === focusId;
+      const statusColor = STATUS_COLORS[n.data.status] ?? '#94a3b8';
+      const layerColor = n.data.layer === 'hub' ? '#f97316' : '#6366f1';
+      
+      return {
+        data: {
+          id: n.data.id,
+          label: n.data.name || n.data.id,
+          statusColor,
+          layerColor,
+          nodeSize: isFocus ? 16 : 8
+        },
+        position: n.position || n.data.position,
+        classes: isFocus ? 'highlight' : ''
+      };
+    });
+    
+    const allVisibleIds = new Set(filteredNodes.map(n => n.data.id));
+    
+    // Edges connecting focus station to neighbors
+    const filteredEdges = graphData.elements.edges.filter(
+      e => allVisibleIds.has(e.data.source) && allVisibleIds.has(e.data.target)
+    );
+    
+    const edges = filteredEdges.map(e => ({
+      data: e.data,
+      classes: (e.data.source === focusId || e.data.target === focusId) ? 'highlight' : ''
+    }));
+    
+    return nodes.concat(edges);
+  }, [stationReport, graphData]);
 
   if (!stationReport && !searchLoading) {
     return (
@@ -101,11 +154,27 @@ export default function StationSearchReport() {
             >
               Focus on map
             </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setIsModalOpen(true)}
+            >
+              🗺️ Open Tactical Map
+            </button>
             <button className="btn btn-danger btn-sm" onClick={handleInjectFromReport}>
               Inject delay here
             </button>
           </div>
         </div>
+      )}
+
+      {stationReport?.station && (
+        <TacticalMapModal
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          title={`🗺️ Tactical Subgraph - ${stationReport.station.name} Local Connections`}
+          description="Displaying the selected station (Yellow focus) and its immediate 1-hop connection neighbors. Status colors indicate real-time node delays."
+          elements={tacticalElements}
+        />
       )}
     </div>
   );

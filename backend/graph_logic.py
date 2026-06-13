@@ -46,7 +46,7 @@ class RailGraph:
             self._status[s.id] = s.status or "clear"
         self._build_cost_cache()
 
-    def astar(self, origin_id: str, dest_id: str) -> tuple[Optional[list[str]], float]:
+    def astar(self, origin_id: str, dest_id: str, avoid_nodes: Optional[set] = None) -> tuple[Optional[list[str]], float]:
         if origin_id not in self._adj or dest_id not in self._adj:
             return None, math.inf
 
@@ -66,6 +66,8 @@ class RailGraph:
                 continue
 
             for (neighbour, default_base, _) in self._adj.get(current, []):
+                if avoid_nodes and neighbour in avoid_nodes:
+                    continue
                 edge_cost = self._cost_cache.get((current, neighbour), default_base)
                 tentative_g = g_score[current] + edge_cost
 

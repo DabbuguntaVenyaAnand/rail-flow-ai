@@ -47,7 +47,9 @@ export function predictRippleOutcome(nodeId, graphData, historical = null) {
   }
 
   // Downstream neighbor stress
-  const downstreamIds = edges.filter(e => e.data.source === nodeId).map(e => e.data.target);
+  const downstreamIds = edges
+    .filter(e => e.data.source === nodeId || e.data.target === nodeId)
+    .map(e => e.data.source === nodeId ? e.data.target : e.data.source);
   let stressed = 0;
   for (const id of downstreamIds) {
     const n = nodes.find(x => x.data.id === id);

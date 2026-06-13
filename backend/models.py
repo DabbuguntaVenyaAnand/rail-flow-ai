@@ -15,8 +15,11 @@ class Station(db.Model):
 
     id = db.Column("station_code", db.String(20), primary_key=True)
     name = db.Column("station_name", db.String(100), nullable=False)
-    
-    # Custom simulation state column added via manual patch command
+    state = db.Column(db.String(60), nullable=True)
+    division = db.Column(db.String(30), nullable=True)
+    zone = db.Column(db.String(30), nullable=True)
+    category = db.Column(db.String(20), nullable=True)
+    layer = db.Column(db.String(20), nullable=False, default="corridor")
     status = db.Column(db.String(20), nullable=False, default="clear")
 
     aliases = db.relationship("StationAlias", back_populates="station", cascade="all, delete-orphan")
@@ -26,11 +29,12 @@ class Station(db.Model):
         return {
             "id": self.id,
             "name": self.name,
-            "state": "Unknown",      # Fallback fields matching your previous mock format
-            "division": "Unknown",
-            "zone": "Unknown",
-            "category": "Standard",
-            "layer": "corridor",
+            "label": self.id,
+            "state": self.state or "Unknown",
+            "division": self.division or "Unknown",
+            "zone": self.zone or "Unknown",
+            "category": self.category or "Standard",
+            "layer": self.layer or "corridor",
             "priority": 3,
             "status": self.status,
             "aliases": [a.alias_code for a in self.aliases],

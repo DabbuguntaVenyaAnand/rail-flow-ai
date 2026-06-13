@@ -4,7 +4,9 @@ import { useNetwork } from '../context/NetworkContext';
 export default function TrainStatusTable() {
   const { trainStatus, fetchTrains } = useNetwork();
 
-  const sorted = [...trainStatus].sort((a, b) => b.delay_minutes - a.delay_minutes);
+  const sorted = [...trainStatus]
+    .sort((a, b) => b.delay_minutes - a.delay_minutes)
+    .slice(0, 100);
 
   return (
     <div className="panel train-panel">
