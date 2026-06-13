@@ -1,4 +1,31 @@
+# Dependencies
 node_modules/
+
+# Python environment
+.venv/
+backend/.venv/
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Flask & Configuration
 .env
+.env.local
+.env.*.local
+instance/
+
+# Testing cache
+.pytest_cache/
+backend/.pytest_cache/
+
+# OS-specific
 .DS_Store
+Thumbs.db
+
+# Frontend production builds
+frontend/build/
+
+# Database dumps
+dump-rail_digital_twin-202606132123.sql
+dump-*.sql

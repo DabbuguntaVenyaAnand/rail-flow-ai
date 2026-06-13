@@ -1,22 +1,25 @@
 # Rail-Flow AI — Digital Twin Control Tower
 
-A 781-station Indian Railways digital twin network with real-time delay simulation, A* pathfinding, dual-code station lookup, and a Cytoscape.js force-directed graph UI.
+A 781-station Indian Railways digital twin network with real-time delay simulation, A* pathfinding, dual-code station lookup, a Cytoscape.js force-directed graph UI, and the advanced HSR-RailFlow rescheduling optimization engine.
 
 ---
 
-## Prerequisites
+## HSR-RailFlow Rescheduling Engine (Core Algorithmic Logic)
 
-Install these before starting. Verify each one opens without errors.
+The **Hybrid Shielded Rolling-Horizon Rescheduler (HSR-RailFlow)** is the mathematical core of the digital twin. It resolves headway and ordering conflicts caused by network disruptions using a **7-phase rolling-horizon optimization cycle**:
 
-| Tool | Download | Verify |
-|------|----------|--------|
-| Python 3.10+ | https://www.python.org/downloads/ | `python --version` |
-| Node.js 18+ | https://nodejs.org | `node --version` |
-| PostgreSQL Server 18 | https://www.postgresql.org/download/ | `"C:\Program Files\PostgreSQL\18\bin\psql.exe" --version` |
-| Git (optional) | https://git-scm.com | `git --version` |
-
-> **Windows note:** Always use **CMD** (not PowerShell) for the commands in this guide.
-> Press `Win + R` → type `cmd` → Enter.
+1. **Phase 1: Operational Schema:** Manages structural data including services date runs (`timetable_runs`), stop timings (`timetable_events`), live delays (`live_train_states`), and auditing metadata.
+2. **Phase 2: Digital Twin Simulator:** Evaluates schedule quality using headway/dwell timing calculations and computes a multi-objective cost function scaling total delays, single-train maximum delays, precedence change penalties, and additional hold-seconds.
+3. **Phase 3: Alternative Graph Optimization:** Models resource scheduling conflicts as alternative arc pairs. An advanced **6-stage Feasibility Shield** prunes cycles and checks safety rules:
+   - *Stage 1:* Cycle detection (DFS)
+   - *Stage 2:* Longest-path linear programming (LP) to derive event times
+   - *Stage 3:* Commit window freeze checking (tolerance 30 s)
+   - *Stage 4:* Running and dwell time bounds
+   - *Stage 5:* Disrupted segment blockages (safety blocks)
+   - *Stage 6:* Headway safety intervals via the Occupancy Model
+4. **Phase 4 & 7: Impact Zone & Rolling Horizons:** Restricts computational scope using an **Impact Zone** headway-cutoff selector (threshold: 20 min). Samples residual timings across 16 scenarios, scores risks using **Conditional Value at Risk (CVaR)**, and runs a continuous warm-started background daemon worker.
+5. **Phase 5 & 6: Machine Learning Predictors (Untrained):** Uses a Heterogeneous Graph Neural Network (`SageHetPredictor`) and gymnasium Double-DQN Policy (`MaskedDqnPolicy`).
+   - *Note:* Since these are untrained in the source repository, the engine automatically falls back to robust, deterministic rule-based algorithms: **`HistoricalBaselinePredictor`** (historical statistics, peak-hour coefficients, and short-headway adjustments) and **`BeamSearchPolicy`** (search width of 8, max expansion 500).
 
 ---
 
@@ -25,199 +28,151 @@ Install these before starting. Verify each one opens without errors.
 ```text
 rail-flow-ai/
 ├── backend/
-│   ├── app.py              ← Flask server + all API endpoints
-│   ├── models.py           ← Database tables (SQLAlchemy)
-│   ├── graph_logic.py      ← A* pathfinding engine
-│   ├── schema.sql          ← PostgreSQL DDL reference
-│   └── requirements.txt    ← Python dependencies
+│   ├── app.py                  ← Flask server, blueprints, and daemon thread
+│   ├── models.py               ← Merged database models (15 SQLAlchemy tables)
+│   ├── config.py               ← Environment-driven configurations
+│   ├── graph_logic.py          ← A* pathfinding engine
+│   ├── disruption_engine.py    ← Ripple propagation model
+│   ├── schema.sql              ← Baseline PostgreSQL DDL reference
+│   ├── rescheduling/           ← Alternative graph & Feasibility Shield
+│   ├── predictors/             ← SAGE-Het GNN and baseline delay forecasts
+│   ├── policies/               ← Greedy, Beam Search, and DQN scheduling
+│   ├── services/               ← Snapshot, impact zone, and audit services
+│   ├── simulator/              ← Occupancy, event timings, and CVaR evaluator
+│   ├── fixtures/               ← Timetables and disruption seed data
+│   ├── training/               ← GNN/DQN training CLI scripts
+│   └── tests/                  ← 160 unit/integration tests
 ├── frontend/
 │   ├── package.json
 │   └── src/
-│       ├── index.js        ← React entry point
-│       ├── App.js          ← Root component
+│       ├── App.js              ← React entry point
 │       └── components/
-│           └── GraphComponent.jsx  ← Main graph UI
+│           ├── GraphComponent.jsx  ← Cytoscape graph UI
+│           └── TacticalMapModal.jsx ← Path overlays & detours tactical modal
 └── data/
-    └── stations_seed.py    ← Seed metadata references
+    └── stations_seed.py        ← Seed metadata references
 ```
 
 ---
 
-## Step 1 — PostgreSQL Setup
+## Prerequisites
 
-### 1a. Add PostgreSQL to your PATH (one-time setup)
+Verify each tool opens without errors:
 
-Open CMD and run:
-```cmd
-setx PATH "%PATH%;C:\Program Files\PostgreSQL\18\bin"
-```
-Close CMD and open a fresh one. Now database utilities will work everywhere.
+| Tool | Download | Verify |
+|------|----------|--------|
+| Python 3.10+ | https://www.python.org/downloads/ | `python --version` |
+| Node.js 18+ | https://nodejs.org | `node --version` |
+| PostgreSQL Server 17/18 | https://www.postgresql.org/download/ | `"C:\Program Files\PostgreSQL\18\bin\psql.exe" --version` |
+| Git | https://git-scm.com | `git --version` |
 
-### 1b. Create the Database Container
+---
+
+## Step 1 — Database Setup (PostgreSQL)
+
+### 1a. Create the Database Container
 Run this command to create an empty database container named `rail_digital_twin`:
 ```cmd
 createdb -U postgres rail_digital_twin
 ```
-*(Enter the master password you assigned to the `postgres` superuser during software installation).*
 
-### 1c. Import the Custom Binary Digital Twin Dump
-Navigate to the directory where your digital twin backup file (`dump-rail_digital_twin-202606131731.sql`) is stored (e.g., your Desktop):
+### 1b. Import the custom PGDMP Dump
+Import the database backup (`dump-rail_digital_twin-202606132123.sql`):
 ```cmd
-cd C:\Users\YourName\Desktop
-```
-Execute the native restore processor to initialize schemas and map binary data rows:
-```cmd
-pg_restore -U postgres -d rail_digital_twin -v dump-rail_digital_twin-202606131731.sql
+pg_restore -U postgres -d rail_digital_twin -v dump-rail_digital_twin-202606132123.sql
 ```
 
-### 1d. Apply Runtime Simulation Engine Patch
-Inject the operational dynamic status constraint flag required by the pathfinding algorithms:
-```cmd
-psql -U postgres -d rail_digital_twin -c "ALTER TABLE public.stations ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'clear';"
-```
+### 1c. Run Schema Migration
+Our PostgreSQL database schema has been successfully migrated to adapt to HSR-RailFlow. It safely preserves the 464 core stations and metadata while updating tables:
+* Renamed `trains` to `train_locations` (telemetry) and updated primary key `train_id` to `VARCHAR(20)`.
+* Created a new `trains` table (catalog) and backfilled it with all distinct trains.
+* Upgraded `station_connections` to include 6 operational columns (`min_headway_seconds`, `is_enabled`, etc.) and backfilled all 16,242 null distances to `60.0` minutes.
+* Restored legacy foreign keys `fk_route_train` and `fk_train` pointing to the new catalog table.
+* Created the remaining 9 HSR-RailFlow tables.
 
-### 1e. Apply Metadata Schema Migration & Backfill
-From the `backend/` directory, run the Python migration script to add missing metadata columns (`state`, `division`, `zone`, `category`, and `layer`) to the PostgreSQL `stations` table and backfill core station records:
-```cmd
-.venv\Scripts\python migration.py
-```
+*(The migration has already been executed on the target environment).*
 
 ---
 
 ## Step 2 — Backend Setup (Flask)
 
-Open CMD and run these one at a time:
-
+Open CMD and run these commands one at a time:
 ```cmd
-cd C:\Users\YourName\Desktop\rail-flow-ai\backend
-```
-
-```cmd
+cd backend
 python -m venv .venv
-```
-
-```cmd
 .venv\Scripts\activate
-```
-
-You should see `(.venv)` appear at the start of the line. Then:
-
-```cmd
 pip install -r requirements.txt
-```
-
-```cmd
 python app.py
 ```
-
 **Expected output:**
+```text
+ * Running on http://127.0.0.1:5000
 ```
- * Running on [http://127.0.0.1:5000](http://127.0.0.1:5000)
-```
-
-The backend is now running. **Leave this CMD window open.**
-
-> **Database Configuration Connection Note:** The application automatically attempts connectivity with standard default user parameters. If your configuration changes, verify your environment settings inside `backend\app.py`:
-> ```python
-> app.config["SQLALCHEMY_DATABASE_URI"] = "postgresql://postgres:YOUR_PASSWORD@localhost:5432/rail_digital_twin"
-> ```
+* **Rolling Horizon background Worker (Optional):** To activate the continuous background scheduling optimizer thread, set the environment variable:
+  ```cmd
+  set ROLLING_HORIZON_ENABLED=true
+  ```
 
 ---
 
 ## Step 3 — Frontend Setup (React)
 
-Open a **second CMD window** (keep the first one running Flask):
-
+Open a **second CMD window**:
 ```cmd
-cd C:\Users\YourName\Desktop\rail-flow-ai\frontend
-```
-
-```cmd
+cd frontend
 npm install
-```
-
-```cmd
 npm start
 ```
-
 Your browser will open automatically at `http://localhost:3000`.
 
 ---
 
-## Step 4 — Verify Everything Works
+## Step 4 — Verify & Seed Data
 
-Open your browser and test these URLs:
+Open your browser or client and verify:
 
-| URL | Expected result |
-|-----|----------------|
-| `http://localhost:3000` | Graph UI loads with 456 core nodes (clutter-free & lag-free) |
-| `http://localhost:5000/api/stations` | JSON list of all 4,447 stations |
-| `http://localhost:5000/api/station-lookup/HWH` | Howrah station details (including State, Zone, etc. from DB) |
-| `http://localhost:5000/api/trains` | Live train telemetry |
-| `http://localhost:5000/api/path?from=TMZ&to=ADTP` | A* path calculation with detour bypass recommendations |
-
----
-
-## Using the UI
-
-### Station Search
-Type either format in the search box:
-- **Node ID (Station Code)** — `C019`, `N001`
-- **Operational code (Alias)** — `HWH`, `NDLS`, `GHY`
-
-Both return the same station metrics. Click **Toggle Status** to cycle it between Green (Clear) → Yellow (Congestion) → Red (Delayed).
-
-### A* Path Finder
-Enter any two station codes in the From/To input forms. The dynamic routing path is highlighted directly on the force graph array layout, calculating dynamic parameters across active delay models in real-time.
-
----
-
-## Restarting After a Reboot
-
-Every time you restart your computer, run both of these in separate CMD windows:
-
-**Window 1 — Backend:**
-```cmd
-cd C:\Users\YourName\Desktop\rail-flow-ai\backend
-.venv\Scripts\activate
-python app.py
-```
-
-**Window 2 — Frontend:**
-```cmd
-cd C:\Users\YourName\Desktop\rail-flow-ai\frontend
-npm start
-```
+| Action / URL | Expected Result |
+|--------------|-----------------|
+| `http://localhost:3000` | Graph UI loads with 456 core stations lag-free. |
+| `http://localhost:5000/api/graph` | Cytoscape graph payload loads in under **0.15 seconds**. |
+| `http://localhost:5000/api/path?from=TMZ&to=ADTP` | A* pathfinder with bypass detour routing. |
+| `flask seed-demo` (Run in backend CMD) | Seeds timetable runs, events, states, and active disruptions. |
+| `POST http://localhost:5000/api/v1/rescheduling/compute` | Computes rescheduling plan, resolving conflicts, and returning objective functions. |
 
 ---
 
 ## API Reference
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/stations` | All 4,447 mapped digital twin network stations |
-| GET | `/api/station-lookup/<code>` | Single station matching lookup targets across native and alias nodes |
-| GET | `/api/trains` | Live active train telemetry |
-| POST | `/api/station/<id>/status` | Body: `{"status":"clear"}` — Updates node status and dynamic routing costs in DB |
-| GET | `/api/graph` | Clutter-free network architecture (456 core stations) for Cytoscape rendering |
-| GET | `/api/path?from=X&to=Y` | A* path and alternative detour bypass calculations |
-| GET | `/api/analytics/delay-history/<code>` | Historical delay patterns for analysis |
-| GET | `/api/predict/ripple/<code>` | BFS delay cascade propagation prediction |
+### Legacy Endpoints
+* `GET /api/stations` - Mapped digital twin stations. Filter by `?layer=hub` or `?state=Bihar`.
+* `GET /api/station-lookup/<code>` - Look up station by ID or operational alias.
+* `GET /api/trains` - Real-time train telemetry wrapped in GTFS-realtime format.
+* `GET /api/trains/<train_id>` - Telemetry metrics for a single train.
+* `POST /api/station/<id>/status` - Updates station status (`clear`, `congestion`, `delayed`).
+* `GET /api/graph` - Cytoscape graph representation of the 456 core backbone stations.
+* `GET /api/path?from=X&to=Y` - A* shortest path with detour bypass routes if disruptions exist.
+* `POST /api/disruption/inject` - Injects active network congestion or delays.
+
+### HSR-RailFlow API
+* **`POST /api/v1/rescheduling/compute`** - Triggers a rescheduling run.
+  * Body (JSON): `{"policy": "beam_search", "horizon_minutes": 60, "use_predictions": true}`
+* **`GET /api/v1/rescheduling/latest`** - Retrieves the last computed rescheduling plan with audit logs, conflict statuses, and actions.
 
 ---
 
-## Troubleshooting
+## Git Commit Guide
 
-**`'psql' or 'createdb' is not recognized`**
-→ PostgreSQL binary utilities are missing from your PATH settings environment profiles. Call your script manually using absolute references:
-`"C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -d rail_digital_twin`
+To commit all integrated HSR-RailFlow directories and schema modifications to your repository, follow these steps:
 
-**`The input is a PostgreSQL custom-format dump`**
-→ You attempted running a compressed binary backup directly using a standard script utility. You must feed custom-format files to `pg_restore` instead of standard script processors.
-
-**`Access denied for user 'postgres'`**
-→ The configuration authentication values inside your engine script strings do not match your database password. Verify credentials inside your local target environment configurations.
-
-**Port 5000 already in use**
-→ Another system background process is currently blocking execution channels. Clear execution lines using administrative commands:
-`netstat -ano | findstr :5000` then terminate using `taskkill /PID <number> /F`.
+1. **Verify changed files:**
+   ```bash
+   git status
+   ```
+2. **Add code changes and new folders:**
+   ```bash
+   git add backend/app.py backend/models.py backend/config.py backend/pytest.ini backend/rescheduling/ backend/predictors/ backend/policies/ backend/services/ backend/simulator/ backend/fixtures/ backend/training/ backend/tests/ backend/api/ README.md
+   ```
+3. **Commit changes:**
+   ```bash
+   git commit -m "feat: integrate HSR-RailFlow rescheduling engine and PostgreSQL schema migration"
+   ```
