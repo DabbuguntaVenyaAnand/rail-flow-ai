@@ -1,30 +1,35 @@
 """
 app.py — Rail-Flow AI  Flask backend
-Endpoints
+
+Legacy endpoints (preserved for frontend compatibility):
   GET  /api/stations                    → full station directory
   GET  /api/station-lookup/<code>       → alias-aware single station lookup
   GET  /api/trains/<train_id>           → real-time telemetry for one train
-  GET  /api/trains                      → all mock train positions
+  GET  /api/trains                      → all train positions
   POST /api/station/<id>/status         → update node status (Green/Yellow/Red)
   GET  /api/graph                       → cytoscape-ready nodes + edges payload
   GET  /api/path?from=X&to=Y            → A* shortest path between two stations
+  POST /api/disruption/inject           → inject downstream disruption
+  GET  /api/predict/ripple/<code>       → heuristic ripple forecast
+  GET  /api/analytics/delay-history/<code> → deterministic historical delay
 """
 
 import os
 import sys
-import random
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_migrate import Migrate
+
+from config import Config
 from models import db, Station, StationAlias, CorridorEdge, TrainLocation
 from graph_logic import RailGraph
 from disruption_engine import propagate_downstream, predict_ripple, mock_delay_history
 
 
-# ── Seed helpers (module-level so they are always defined) ───────────────────
+# ── Seed helpers ──────────────────────────────────────────────────────────────
 
 def _seed_stations():
-    """Import all 500 stations + aliases from the companion seed file."""
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "data"))
     from stations_seed import CORRIDOR_STATIONS, HUB_STATIONS
 
@@ -59,7 +64,6 @@ def _seed_stations():
 
 
 def _seed_edges():
-    """Seed a representative subset of corridor edges."""
     sample_edges = [
         ("C019", "C020", 45,  15),
         ("C019", "C031", 120, 80),
@@ -87,67 +91,79 @@ def _seed_if_empty():
     print("[Rail-Flow] Database seeded with 500 stations.")
 
 
-def _generate_mock_trains():
-    """Mock Data Orchestrator - GTFS-structured demo data."""
-    sample_ids = ["C019","C031","C013","C017","C021","C022","C082",
-                  "C084","C127","C030","N001","N005","N032","N043",
-                  "N053","N067","N026","N038","N047","N073"]
-    train_names = [
-        "Rajdhani Express","Shatabdi Express","Duronto Express",
-        "Jan Shatabdi","Garib Rath","Humsafar Express","Vande Bharat",
-        "Tejas Express","Antyodaya Express","Sampark Kranti"
-    ]
-    trains = []
-    for i, s_id in enumerate(sample_ids):
-        t = TrainLocation(
-            train_id        = str(12301 + i),
-            train_name      = random.choice(train_names),
-            current_station = s_id,
-            delay_minutes   = random.choice([0, 0, 0, 5, 10, 15, 30, 45]),
-            speed_kmh       = round(random.uniform(40, 130), 1),
-            last_updated    = datetime.utcnow() - timedelta(minutes=random.randint(0, 5)),
-            gtfs_trip_id    = f"IR-TRIP-{12301+i}"
-        )
-        db.session.add(t)
-        trains.append(t)
-    db.session.commit()
-    return trains
-
-
 # ── App factory ───────────────────────────────────────────────────────────────
 
-def create_app(config=None):
+def create_app(config_overrides=None):
     app = Flask(__name__)
     CORS(app)
 
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
-        "DATABASE_URL",
-        "mysql+pymysql://root:201810@localhost:3306/railflow_db"
-    )
-    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
-    if config:
-        app.config.update(config)
+    app.config.from_object(Config)
+    if config_overrides:
+        app.config.update(config_overrides)
 
     db.init_app(app)
+    Migrate(app, db)
 
-    # Create tables
+    demo_mode = app.config.get("DEMO_MODE", True)
+
     with app.app_context():
-        db.create_all()
+        if demo_mode:
+            # Convenience: auto-create tables on first run in demo mode so
+            # developers can start without running `flask db upgrade`.
+            # Production deployments must use `flask db upgrade` instead.
+            db.create_all()
+        try:
+            _seed_if_empty()
+        except Exception:
+            # Tables don't exist yet (fresh production DB before `flask db upgrade`).
+            # Seeding will succeed after migrations are applied.
+            pass
 
-    # Seed data
-    with app.app_context():
-        _seed_if_empty()
-
-    # Build graph
     rail_graph = RailGraph()
     with app.app_context():
-        rail_graph.build_from_db()
+        try:
+            rail_graph.build_from_db()
+        except Exception:
+            # Tables don't exist yet (pre-migration). Graph will be empty
+            # until `flask db upgrade` is run and the app is restarted.
+            pass
 
-    # ── Helper ────────────────────────────────────────────────────────────────
+    # ── Blueprints ───────────────────────────────────────────────────────
+    from api.rescheduling_routes import rescheduling_bp
+    app.register_blueprint(rescheduling_bp)
+
+    # ── Rolling-horizon background worker (opt-in) ───────────────────────
+    if app.config.get("ROLLING_HORIZON_ENABLED", False):
+        from rescheduling.rolling_horizon import RollingHorizonService
+        _rolling_svc = RollingHorizonService(
+            horizon_minutes=app.config.get("HORIZON_MIN", 60),
+            commit_window_minutes=app.config.get("COMMIT_WINDOW_MIN", 10),
+            policy_name=app.config.get("POLICY_BACKEND", "beam_search"),
+            refresh_seconds=app.config.get("ROLLING_REFRESH_SECONDS", 60),
+        )
+        _rolling_svc.start_background_worker(app)
+
+        @app.teardown_appcontext
+        def _stop_rolling_horizon(exc):
+            _rolling_svc.stop()
+
+    # ── CLI commands ─────────────────────────────────────────────────────
+
+    @app.cli.command("seed-demo")
+    def seed_demo_command():
+        """Load deterministic demo fixtures (timetable, live states, disruptions)."""
+        from fixtures.demo_timetable import load_demo_timetable
+        from fixtures.demo_disruptions import load_demo_disruptions
+        with app.app_context():
+            load_demo_timetable()
+            load_demo_disruptions()
+        print("[Rail-Flow] Demo fixtures loaded.")
+
+    # ── Helpers ───────────────────────────────────────────────────────────
+
     def resolve_station(code: str):
         code = code.strip().upper()
-        station = Station.query.get(code)
+        station = db.session.get(Station, code)
         if station:
             return station
         alias = StationAlias.query.filter(
@@ -155,7 +171,7 @@ def create_app(config=None):
         ).first()
         return alias.station if alias else None
 
-    # ── Routes ────────────────────────────────────────────────────────────────
+    # ── Legacy routes ─────────────────────────────────────────────────────
 
     @app.route("/api/stations", methods=["GET"])
     def get_stations():
@@ -171,28 +187,27 @@ def create_app(config=None):
     def station_lookup(code_input):
         station = resolve_station(code_input)
         if not station:
-            return jsonify({
-                "error": f"No station found for code '{code_input.upper()}'."
-            }), 404
+            return jsonify({"error": f"No station found for code '{code_input.upper()}'."}), 404
         return jsonify(station.to_dict())
 
     @app.route("/api/trains", methods=["GET"])
     def get_all_trains():
         trains = TrainLocation.query.all()
-        if not trains:
-            trains = _generate_mock_trains()
+        if not trains and demo_mode:
+            from fixtures.demo_timetable import load_demo_train_locations
+            trains = load_demo_train_locations()
         return jsonify({
             "header": {
                 "gtfs_realtime_version": "2.0",
-                "timestamp": datetime.utcnow().isoformat(),
-                "incrementality": "FULL_DATASET"
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "incrementality": "FULL_DATASET",
             },
-            "entity": [t.to_dict() for t in trains]
+            "entity": [t.to_dict() for t in trains],
         })
 
     @app.route("/api/trains/<train_id>", methods=["GET"])
     def get_train(train_id):
-        train = TrainLocation.query.get(train_id)
+        train = db.session.get(TrainLocation, train_id)
         if not train:
             return jsonify({"error": f"Train '{train_id}' not found."}), 404
         return jsonify(train.to_dict())
@@ -292,7 +307,7 @@ def create_app(config=None):
             return jsonify({"error": "No path found between the two stations."}), 404
         path_details = []
         for node_id in path:
-            s = Station.query.get(node_id)
+            s = db.session.get(Station, node_id)
             path_details.append({"id": s.id, "name": s.name, "status": s.status})
         return jsonify({
             "from":       origin.id,

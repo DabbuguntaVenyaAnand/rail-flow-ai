@@ -1,7 +1,10 @@
-# Rail-Flow AI — Python dependencies
 Flask==3.0.3
 Flask-Cors==4.0.1
 Flask-SQLAlchemy==3.1.1
-PyMySQL==1.1.1
-cryptography==42.0.8      # PyMySQL SSL support
-python-dotenv==1.0.1
+Flask-Migrate==4.0.7
+# PostgreSQL driver (psycopg v3 binary wheel)
+psycopg[binary]==3.2.3
+python-dotenv>=1.1.0
+# Testing
+pytest==8.3.3
+pytest-flask==1.3.0

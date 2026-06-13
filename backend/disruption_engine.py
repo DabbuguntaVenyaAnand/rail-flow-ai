@@ -1,22 +1,26 @@
 """
 disruption_engine.py — Rail-Flow AI
-Downstream ripple propagation and delay prediction for the disruption management engine.
+Downstream ripple propagation and delay prediction for the disruption
+management engine.
+
+mock_delay_history() produces deterministic output for any given station_id.
+It uses a stable hash (hashlib.md5) seeded RNG and a fixed reference date
+so that two successive calls always return identical JSON.
 """
 
+import hashlib
 import random
-from datetime import datetime, timedelta
+from datetime import date, timedelta
 
 from graph_logic import RailGraph
+
 
 def propagate_downstream(
     rail_graph: RailGraph,
     start_id: str,
     max_depth: int = 3,
 ) -> tuple[set[str], dict[str, int]]:
-    """
-    BFS downstream from start_id following adjacency direction.
-    Returns (impacted_ids, hop_map).
-    """
+    """BFS downstream from start_id. Returns (impacted_ids, hop_map)."""
     impacted: set[str] = set()
     hop_map: dict[str, int] = {}
     queue: list[tuple[str, int]] = [(start_id, 0)]
@@ -83,16 +87,30 @@ def predict_ripple(
     }
 
 
+# Fixed reference date so weekly_history dates are always the same.
+# Update this constant when regenerating demo analytics for a new period.
+_HISTORY_REFERENCE_DATE = date(2026, 6, 13)
+
+
 def mock_delay_history(station_id: str) -> dict:
-    """Generate plausible 30-day delay history for demo."""
-    rng = random.Random(hash(station_id) % 2**32)
+    """
+    Produce deterministic 30-day delay summary for demo/analytics.
+
+    Uses a stable MD5-seeded RNG so the same station_id always yields
+    the same numbers, independent of Python's PYTHONHASHSEED or the
+    current wall-clock time.
+    """
+    seed_int = int(hashlib.md5(station_id.encode()).hexdigest(), 16) % (2**32)
+    rng = random.Random(seed_int)
+
     incidents = rng.randint(2, 14)
     avg_delay = rng.randint(5, 40)
+
     history = []
     for i in range(7):
-        day = datetime.utcnow() - timedelta(days=i)
+        day = _HISTORY_REFERENCE_DATE - timedelta(days=i)
         history.append({
-            "date": day.strftime("%Y-%m-%d"),
+            "date": day.isoformat(),
             "incidents": rng.randint(0, 3),
             "avg_delay_min": rng.randint(0, avg_delay + 10),
         })

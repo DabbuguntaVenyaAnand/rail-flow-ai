@@ -15,7 +15,7 @@ Install these before starting. Verify each one opens without errors.
 | Node.js 18+ | https://nodejs.org | `node --version` |
 | MySQL Server 8.0 | https://dev.mysql.com/downloads/installer/ | `mysql --version` |
 | MySQL Workbench | Included in MySQL installer above | Open from Start Menu |
-| Git (optional) | https://git-scm.com | `git --version` |
+| Git (optional) | https://git-scm.com |    `git --version` |
 
 > **Windows note:** Always use **CMD** (not PowerShell) for the commands in this guide.
 > Press `Win + R` → type `cmd` → Enter.
