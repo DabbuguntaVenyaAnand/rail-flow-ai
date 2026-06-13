@@ -1,7 +1,6 @@
 # Rail-Flow AI — Digital Twin Control Tower
 
-A 500-station Indian Railways demo network with real-time delay simulation,
-A* pathfinding, dual-code station lookup, and a Cytoscape.js force-directed graph UI.
+A 781-station Indian Railways digital twin network with real-time delay simulation, A* pathfinding, dual-code station lookup, and a Cytoscape.js force-directed graph UI.
 
 ---
 
@@ -13,8 +12,7 @@ Install these before starting. Verify each one opens without errors.
 |------|----------|--------|
 | Python 3.10+ | https://www.python.org/downloads/ | `python --version` |
 | Node.js 18+ | https://nodejs.org | `node --version` |
-| MySQL Server 8.0 | https://dev.mysql.com/downloads/installer/ | `mysql --version` |
-| MySQL Workbench | Included in MySQL installer above | Open from Start Menu |
+| PostgreSQL Server 18 | https://www.postgresql.org/download/ | `"C:\Program Files\PostgreSQL\18\bin\psql.exe" --version` |
 | Git (optional) | https://git-scm.com | `git --version` |
 
 > **Windows note:** Always use **CMD** (not PowerShell) for the commands in this guide.
@@ -24,13 +22,13 @@ Install these before starting. Verify each one opens without errors.
 
 ## Project Structure
 
-```
+```text
 rail-flow-ai/
 ├── backend/
 │   ├── app.py              ← Flask server + all API endpoints
 │   ├── models.py           ← Database tables (SQLAlchemy)
 │   ├── graph_logic.py      ← A* pathfinding engine
-│   ├── schema.sql          ← Optional raw MySQL DDL
+│   ├── schema.sql          ← PostgreSQL DDL reference
 │   └── requirements.txt    ← Python dependencies
 ├── frontend/
 │   ├── package.json
@@ -40,33 +38,43 @@ rail-flow-ai/
 │       └── components/
 │           └── GraphComponent.jsx  ← Main graph UI
 └── data/
-    └── stations_seed.py    ← All 500 station records
+    └── stations_seed.py    ← Seed metadata references
 ```
 
 ---
 
-## Step 1 — MySQL Setup
+## Step 1 — PostgreSQL Setup
 
-### 1a. Add MySQL to your PATH (one-time setup)
+### 1a. Add PostgreSQL to your PATH (one-time setup)
 
 Open CMD and run:
 ```cmd
-setx PATH "%PATH%;C:\Program Files\MySQL\MySQL Server 8.0\bin"
+setx PATH "%PATH%;C:\Program Files\PostgreSQL\18\bin"
 ```
-Close CMD and open a fresh one. Now `mysql` will work everywhere.
+Close CMD and open a fresh one. Now database utilities will work everywhere.
 
-### 1b. Create the database
-
+### 1b. Create the Database Container
+Run this command to create an empty database container named `rail_digital_twin`:
 ```cmd
-mysql -u root -p201810 -e "CREATE DATABASE IF NOT EXISTS railflow_db;"
+createdb -U postgres rail_digital_twin
+```
+*(Enter the master password you assigned to the `postgres` superuser during software installation).*
+
+### 1c. Import the Custom Binary Digital Twin Dump
+Navigate to the directory where your digital twin backup file (`dump-rail_digital_twin-202606131731.sql`) is stored (e.g., your Desktop):
+```cmd
+cd C:\Users\YourName\Desktop
+```
+Execute the native restore processor to initialize schemas and map binary data rows:
+```cmd
+pg_restore -U postgres -d rail_digital_twin -v dump-rail_digital_twin-202606131731.sql
 ```
 
-Replace `201810` with your MySQL root password if different.
-
-> **Alternative:** Open MySQL Workbench → connect → run this in a query tab:
-> ```sql
-> CREATE DATABASE IF NOT EXISTS railflow_db;
-> ```
+### 1d. Apply Runtime Simulation Engine Patch
+Inject the operational dynamic status constraint flag required by the pathfinding algorithms:
+```cmd
+psql -U postgres -d rail_digital_twin -c "ALTER TABLE public.stations ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'clear';"
+```
 
 ---
 
@@ -98,16 +106,14 @@ python app.py
 
 **Expected output:**
 ```
-[Rail-Flow] Database seeded with 500 stations.
- * Running on http://127.0.0.1:5000
+ * Running on [http://127.0.0.1:5000](http://127.0.0.1:5000)
 ```
 
 The backend is now running. **Leave this CMD window open.**
 
-> If you see `Access denied for user 'root'`, open `backend\app.py` and update
-> this line with your correct MySQL password:
+> **Database Configuration Connection Note:** The application automatically attempts connectivity with standard default user parameters. If your configuration changes, verify your environment settings inside `backend\app.py`:
 > ```python
-> "mysql+pymysql://root:YOUR_PASSWORD@localhost:3306/railflow_db"
+> app.config["SQLALCHEMY_DATABASE_URI"] = "postgresql://postgres:YOUR_PASSWORD@localhost:5432/rail_digital_twin"
 > ```
 
 ---
@@ -138,12 +144,11 @@ Open your browser and test these URLs:
 
 | URL | Expected result |
 |-----|----------------|
-| `http://localhost:3000` | Graph UI loads with 500 nodes |
-| `http://localhost:5000/api/stations` | JSON list of all 500 stations |
+| `http://localhost:3000` | Graph UI loads with 781 nodes |
+| `http://localhost:5000/api/stations` | JSON list of all 781 stations |
 | `http://localhost:5000/api/station-lookup/HWH` | Howrah station details |
-| `http://localhost:5000/api/station-lookup/C019` | Same station via Node ID |
-| `http://localhost:5000/api/trains` | Mock train telemetry |
-| `http://localhost:5000/api/path?from=C019&to=C022` | A* path from Howrah to NJP |
+| `http://localhost:5000/api/trains` | Mock train telemetry mapping layers |
+| `http://localhost:5000/api/path?from=C019&to=C022` | A* path parsing dynamic connection costs |
 
 ---
 
@@ -151,19 +156,13 @@ Open your browser and test these URLs:
 
 ### Station Search
 Type either format in the search box:
-- **Node ID** — `C019`, `N001`
-- **Operational code** — `HWH`, `NDLS`, `GHY`
+- **Node ID (Station Code)** — `C019`, `N001`
+- **Operational code (Alias)** — `HWH`, `NDLS`, `GHY`
 
-Both return the same station. Click **Toggle Status** to cycle it between
-Green (Clear) → Yellow (Congestion) → Red (Delayed).
+Both return the same station metrics. Click **Toggle Status** to cycle it between Green (Clear) → Yellow (Congestion) → Red (Delayed).
 
 ### A* Path Finder
-Enter any two station codes (Node ID or alias) in the From/To boxes.
-The shortest path is highlighted on the graph with dynamic cost shown in minutes.
-
-### Node Click
-Click any node on the graph to see its full details in the sidebar.
-Click **Cycle Status** to change its state live.
+Enter any two station codes in the From/To input forms. The dynamic routing path is highlighted directly on the force graph array layout, calculating dynamic parameters across active delay models in real-time.
 
 ---
 
@@ -190,46 +189,28 @@ npm start
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/stations` | All 500 stations. Filter with `?layer=corridor` or `?state=Bihar` |
-| GET | `/api/station-lookup/<code>` | Single station by Node ID or alias |
-| GET | `/api/trains` | All trains, GTFS-structured mock telemetry |
-| GET | `/api/trains/<id>` | Single train by ID |
-| POST | `/api/station/<id>/status` | Body: `{"status":"clear"}` — updates node color |
-| GET | `/api/graph` | Full graph payload for Cytoscape.js |
-| GET | `/api/path?from=X&to=Y` | A* shortest path with dynamic cost |
+| GET | `/api/stations` | All 781 mapped digital twin network stations |
+| GET | `/api/station-lookup/<code>` | Single station matching lookup targets across native and alias nodes |
+| GET | `/api/trains` | Live real-time active train trajectory mappings |
+| GET | `/api/trains/<id>` | Single train track telemetry by identification numbers |
+| POST | `/api/station/<id>/status` | Body: `{"status":"clear"}` — Updates node color state and path tracking cost caches |
+| GET | `/api/graph` | Full network architecture output mapped for Cytoscape renderer parsing |
+| GET | `/api/path?from=X&to=Y` | A* path calculations across complex delay metric configurations |
 
 ---
 
 ## Troubleshooting
 
-**`'mysql' is not recognized`**
-→ MySQL is not in PATH. Run the `setx` command in Step 1a, then reopen CMD.
+**`'psql' or 'createdb' is not recognized`**
+→ PostgreSQL binary utilities are missing from your PATH settings environment profiles. Call your script manually using absolute references:
+`"C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -d rail_digital_twin`
 
-**`Access denied for user 'root'`**
-→ Wrong password in `app.py`. Update the connection string with your actual MySQL password.
+**`The input is a PostgreSQL custom-format dump`**
+→ You attempted running a compressed binary backup directly using a standard script utility. You must feed custom-format files to `pg_restore` instead of standard script processors.
 
-**`Could not find a required file: index.html`**
-→ Create `frontend\public\index.html` — see the HTML content in Step 3 above,
-or copy it from the project zip.
-
-**`'source' is not recognized`**
-→ You are in PowerShell. Switch to CMD (`Win + R` → `cmd`).
-
-**`UnboundLocalError: cannot access local variable`**
-→ Replace `backend\app.py` with the latest version from the project zip.
+**`Access denied for user 'postgres'`**
+→ The configuration authentication values inside your engine script strings do not match your database password. Verify credentials inside your local target environment configurations.
 
 **Port 5000 already in use**
-→ Another process is using the port. Run `netstat -ano | findstr :5000` in CMD
-to find it, then `taskkill /PID <number> /F` to stop it.
-
-**Frontend shows "Cannot reach API"**
-→ Make sure the Flask backend is running in the other CMD window on port 5000.
-
----
-
-## Dataset Notes
-
-- Station data sourced from the RailTel Region 1 North+East annexure + curated hub overlay.
-- This is a **modelling dataset** — not an official delay or priority ranking.
-- Some historical station codes may need verification against current IR operational systems before production use.
-- The companion `data/stations_seed.py` contains all 500 records and can be edited to add or correct entries.
+→ Another system background process is currently blocking execution channels. Clear execution lines using administrative commands:
+`netstat -ano | findstr :5000` then terminate using `taskkill /PID <number> /F`.

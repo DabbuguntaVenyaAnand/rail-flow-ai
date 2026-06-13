@@ -1,22 +1,12 @@
 """
 disruption_engine.py — Rail-Flow AI
-Downstream ripple propagation and delay prediction for the disruption management engine.
 """
 
 import random
 from datetime import datetime, timedelta
-
 from graph_logic import RailGraph
 
-def propagate_downstream(
-    rail_graph: RailGraph,
-    start_id: str,
-    max_depth: int = 3,
-) -> tuple[set[str], dict[str, int]]:
-    """
-    BFS downstream from start_id following adjacency direction.
-    Returns (impacted_ids, hop_map).
-    """
+def propagate_downstream(rail_graph: RailGraph, start_id: str, max_depth: int = 3) -> tuple[set[str], dict[str, int]]:
     impacted: set[str] = set()
     hop_map: dict[str, int] = {}
     queue: list[tuple[str, int]] = [(start_id, 0)]
@@ -37,24 +27,13 @@ def propagate_downstream(
     impacted.discard(start_id)
     return impacted, hop_map
 
-
-def predict_ripple(
-    rail_graph: RailGraph,
-    station,
-    max_depth: int = 3,
-) -> dict:
-    """Heuristic ripple forecast for a station."""
+def predict_ripple(rail_graph: RailGraph, station, max_depth: int = 3) -> dict:
     out_degree = len(rail_graph.neighbours(station.id))
     score = 0.25
 
     if out_degree >= 3:
         score += 0.3
     elif out_degree >= 1:
-        score += 0.15
-
-    if station.layer == "hub":
-        score += 0.2
-    if station.priority <= 2:
         score += 0.15
 
     stressed = sum(
@@ -75,16 +54,10 @@ def predict_ripple(
             {"id": nid, "hop": hop_map[nid], "status": rail_graph._status.get(nid, "clear")}
             for nid in sorted(impacted, key=lambda x: hop_map[x])
         ],
-        "resolution_estimate": (
-            "Expect cascade — recommend rerouting"
-            if score >= 0.5
-            else "Likely contained within local corridor"
-        ),
+        "resolution_estimate": "Expect cascade — recommend rerouting" if score >= 0.5 else "Likely contained within local corridor",
     }
 
-
 def mock_delay_history(station_id: str) -> dict:
-    """Generate plausible 30-day delay history for demo."""
     rng = random.Random(hash(station_id) % 2**32)
     incidents = rng.randint(2, 14)
     avg_delay = rng.randint(5, 40)

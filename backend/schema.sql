@@ -1,63 +1,55 @@
 -- ─────────────────────────────────────────────
--- Rail-Flow AI — MySQL Schema
--- Run once to bootstrap the database.
--- SQLAlchemy will handle subsequent migrations.
+-- Rail-Flow AI — PostgreSQL Schema Baseline
 -- ─────────────────────────────────────────────
 
-CREATE DATABASE IF NOT EXISTS railflow_db
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
+-- Create database container if executing outside an existing setup
+-- CREATE DATABASE rail_digital_twin;
 
-USE railflow_db;
+-- Stations master table (Standardized column names)
+CREATE TABLE IF NOT EXISTS public.stations (
+    station_code  VARCHAR(20)  NOT NULL PRIMARY KEY,
+    station_name  VARCHAR(100) NOT NULL,
+    state         VARCHAR(60),
+    status        VARCHAR(20)  NOT NULL DEFAULT 'clear',
+    CONSTRAINT chk_status CHECK (status IN ('clear', 'congestion', 'delayed'))
+);
 
--- Stations master table
-CREATE TABLE IF NOT EXISTS stations (
-    id          VARCHAR(10)  NOT NULL PRIMARY KEY,
-    name        VARCHAR(120) NOT NULL,
-    state       VARCHAR(60)  NOT NULL,
-    division    VARCHAR(20),
-    zone        VARCHAR(10),
-    category    VARCHAR(5),
-    layer       VARCHAR(20)  NOT NULL DEFAULT 'corridor',
-    priority    TINYINT      NOT NULL DEFAULT 3,
-    status      VARCHAR(20)  NOT NULL DEFAULT 'clear',
-    CONSTRAINT chk_status CHECK (status IN ('clear','congestion','delayed')),
-    CONSTRAINT chk_layer  CHECK (layer  IN ('corridor','hub'))
-) ENGINE=InnoDB;
-
--- Alias mapping (dual-code lookup engine)
-CREATE TABLE IF NOT EXISTS station_aliases (
-    alias_id    INT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    station_id  VARCHAR(10)  NOT NULL,
+-- Alias mapping table
+CREATE TABLE IF NOT EXISTS public.station_aliases (
+    alias_id    SERIAL       NOT NULL PRIMARY KEY,
+    station_code VARCHAR(20)  NOT NULL,
     alias_code  VARCHAR(20)  NOT NULL UNIQUE,
     alias_type  VARCHAR(30)  NOT NULL DEFAULT 'operational',
     CONSTRAINT fk_alias_station
-        FOREIGN KEY (station_id) REFERENCES stations(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
+        FOREIGN KEY (station_code) REFERENCES public.stations(station_code) ON DELETE CASCADE
+);
 
-CREATE INDEX idx_alias_code ON station_aliases (alias_code);
+CREATE INDEX IF NOT EXISTS idx_alias_code ON public.station_aliases (alias_code);
 
--- Graph edges
-CREATE TABLE IF NOT EXISTS corridor_edges (
-    edge_id           INT           NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    from_station_id   VARCHAR(10)   NOT NULL,
-    to_station_id     VARCHAR(10)   NOT NULL,
-    base_time_min     FLOAT         NOT NULL DEFAULT 60.0,
-    distance_km       FLOAT,
-    is_bidirectional  TINYINT(1)    NOT NULL DEFAULT 1,
-    CONSTRAINT fk_edge_from FOREIGN KEY (from_station_id) REFERENCES stations(id),
-    CONSTRAINT fk_edge_to   FOREIGN KEY (to_station_id)   REFERENCES stations(id)
-) ENGINE=InnoDB;
+-- Graph edges (Maps to your live station_connections table configuration)
+CREATE TABLE IF NOT EXISTS public.station_connections (
+    connection_id       SERIAL         NOT NULL PRIMARY KEY,
+    source_station      VARCHAR(20)    NOT NULL,
+    destination_station VARCHAR(20)    NOT NULL,
+    distance_km         NUMERIC(10,2)  NOT NULL DEFAULT 60.0,
+    corridor_name       VARCHAR(100),
+    CONSTRAINT uq_connection UNIQUE (source_station, destination_station),
+    CONSTRAINT fk_source_station      FOREIGN KEY (source_station)      REFERENCES public.stations(station_code),
+    CONSTRAINT fk_destination_station FOREIGN KEY (destination_station) REFERENCES public.stations(station_code)
+);
 
--- Real-time train telemetry
-CREATE TABLE IF NOT EXISTS train_locations (
-    train_id         VARCHAR(20)  NOT NULL PRIMARY KEY,
-    train_name       VARCHAR(100),
-    current_station  VARCHAR(10),
-    delay_minutes    INT          NOT NULL DEFAULT 0,
-    speed_kmh        FLOAT,
-    last_updated     DATETIME     NOT NULL,
-    gtfs_trip_id     VARCHAR(40),
-    CONSTRAINT fk_train_station
-        FOREIGN KEY (current_station) REFERENCES stations(id)
-) ENGINE=InnoDB;
+-- Trains structural lookup table
+CREATE TABLE IF NOT EXISTS public.trains (
+    train_number BIGINT       NOT NULL PRIMARY KEY,
+    train_name   VARCHAR(200)
+);
+
+-- Train route sequencer table
+CREATE TABLE IF NOT EXISTS public.train_routes (
+    train_number  BIGINT      NOT NULL,
+    station_code  VARCHAR(20) NOT NULL,
+    stop_sequence INTEGER     NOT NULL,
+    CONSTRAINT train_routes_pkey PRIMARY KEY (train_number, stop_sequence),
+    CONSTRAINT fk_route_train    FOREIGN KEY (train_number) REFERENCES public.trains(train_number),
+    CONSTRAINT fk_route_station  FOREIGN KEY (station_code) REFERENCES public.stations(station_code)
+);
