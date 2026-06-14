@@ -3,11 +3,10 @@ rescheduling/local_search.py — Rail-Flow AI
 
 LocalSearch: Section 8.5 of the HSR-RailFlow report.
 
-Four non-worsening move types applied until the time budget is exhausted:
+Three non-worsening move types applied until the time budget is exhausted:
   1. FlipPrecedence(pair_id)           — swap arc direction for one pair
   2. RemoveHold(run_id, dep_stop_seq)  — zero a release-arc extension
   3. ShortenHold(run_id, dep_stop_seq, delta) — reduce hold by delta seconds
-  4. RestoreOriginalOrder(pair_id)     — revert to timetable-scheduled direction
 
 A move is accepted only if the full FeasibilityShield passes and the objective
 does not increase.
@@ -155,29 +154,6 @@ class LocalSearch:
                         improved = True
                         break
                 if improved:
-                    break
-
-            # Move 4: RestoreOriginalOrder — revert to timetable order for a pair
-            for pair in list(g.alt_pairs.values()):
-                if time.monotonic() > deadline:
-                    break
-                orig_dir = _timetable_order(pair, current.alt_graph)
-                if orig_dir is None:
-                    continue
-                current_sel = g.selections.get(pair.pair_id)
-                if current_sel == orig_dir:
-                    continue
-                candidate = current.alt_graph.copy()
-                candidate.select_arc(pair.pair_id, orig_dir)
-                result = self.shield.validate(candidate)
-                if result.accepted and result.lower_bound <= current.lower_bound + 1.0:
-                    current = CandidatePlan(
-                        alt_graph=candidate,
-                        holds=dict(current.holds),
-                        lower_bound=result.lower_bound,
-                        policy_name=current.policy_name,
-                    )
-                    improved = True
                     break
 
         return current

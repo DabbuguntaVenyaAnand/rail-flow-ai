@@ -56,7 +56,7 @@ class Config:
     ENABLE_LOCAL_REROUTE = os.environ.get("ENABLE_LOCAL_REROUTE", "false").lower() == "true"
     ENABLE_CANCELLATION = os.environ.get("ENABLE_CANCELLATION", "false").lower() == "true"
     # Set to "true" in production to activate the rolling-horizon background worker.
-    ROLLING_HORIZON_ENABLED = os.environ.get("ROLLING_HORIZON_ENABLED", "false").lower() == "true"
+    ROLLING_HORIZON_ENABLED = os.environ.get("ROLLING_HORIZON_ENABLED", "true").lower() == "true"
 
 
 class TestingConfig(Config):

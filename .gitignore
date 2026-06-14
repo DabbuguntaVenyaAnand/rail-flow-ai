@@ -29,3 +29,22 @@ frontend/build/
 # Database dumps
 dump-rail_digital_twin-202606132123.sql
 dump-*.sql
+
+# Temporary workspace scripts & folders
+scratch/
+far/
+
+# Local database files
+*.db
+*.sqlite
+*.sqlite3
+
+# IDEs & Editor configs
+.vscode/
+.idea/
+.project
+.classpath
+.settings/
+*.suo
+*.user
+*.sln

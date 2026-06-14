@@ -69,15 +69,33 @@ class FeasibilityShield:
         event_times = _longest_paths(arcs, g.nodes, g.t0_seconds)
 
         # Stage 3: Commit-window check
-        commit_end = g.t0_seconds + g.commit_window_seconds
         for node, ts in event_times.items():
             sched = g.scheduled_times.get(node)
-            if sched is not None and sched <= commit_end:
-                if ts > sched + self.COMMIT_TOLERANCE_S:
-                    return ShieldResult(
-                        accepted=False,
-                        reason=f"commit-window violation at {node}",
-                    )
+            if sched is not None:
+                # Calculate dynamic commit window for this specific train run
+                commit_window_s = g.commit_window_seconds
+                try:
+                    from models import LiveTrainState, CorridorEdge
+                    state = LiveTrainState.query.filter_by(run_id=node.run_id).first()
+                    if state and state.speed_kmh and state.speed_kmh > 0:
+                        speed = float(state.speed_kmh)
+                        edge = None
+                        if state.current_segment_id:
+                            edge = CorridorEdge.query.get(state.current_segment_id)
+                        distance = float(edge.distance_km if edge and edge.distance_km else 50.0)
+                        # Commit window = max(10 min, (Distance / Speed) * 1.2)
+                        travel_time_s = (distance / speed) * 3600.0
+                        commit_window_s = max(commit_window_s, travel_time_s * 1.2)
+                except Exception:
+                    pass
+                
+                commit_end = g.t0_seconds + commit_window_s
+                if sched <= commit_end:
+                    if ts > sched + self.COMMIT_TOLERANCE_S:
+                        return ShieldResult(
+                            accepted=False,
+                            reason=f"commit-window violation at {node}",
+                        )
 
         # Stage 4: Dwell / running-time lower bounds
         for arc in arcs:

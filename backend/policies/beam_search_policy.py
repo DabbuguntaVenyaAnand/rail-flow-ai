@@ -3,7 +3,7 @@ policies/beam_search_policy.py — Rail-Flow AI
 
 BeamSearchPolicy — Algorithm 5 from the HSR-RailFlow report.
 
-B=8 beam width, E_max=500 max expansions.
+B=20 beam width, E_max=200 max expansions, 800 ms time limit.
 At each step, the earliest unresolved pair is expanded in both directions;
 only candidates that pass validate_partial() (cycle check) are retained.
 The beam is pruned to the top-B states by lower-bound after each expansion.
@@ -18,8 +18,8 @@ from rescheduling.feasibility import FeasibilityShield
 from rescheduling.local_search import CandidatePlan
 from policies.greedy_policy import _earliest_pair, GreedyPolicy
 
-BEAM_WIDTH = 8
-EXPANSIONS_MAX = 500
+BEAM_WIDTH = 20
+EXPANSIONS_MAX = 200
 
 
 class BeamSearchPolicy:

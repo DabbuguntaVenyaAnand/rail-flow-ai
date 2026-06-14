@@ -104,6 +104,61 @@ def latest():
         .all()
     )
 
+    from models import db, DelayPrediction, TimetableRun
+    predictions = (
+        DelayPrediction.query
+        .filter_by(snapshot_id=run.snapshot_id)
+        .order_by(DelayPrediction.horizon_minutes, DelayPrediction.run_id)
+        .all()
+    )
+    
+    predictions_data = []
+    for p in predictions:
+        run_obj = db.session.get(TimetableRun, p.run_id)
+        train_num = run_obj.train_number if run_obj else "Unknown"
+        predictions_data.append({
+            "run_id": p.run_id,
+            "train_number": train_num,
+            "horizon_minutes": p.horizon_minutes,
+            "p50_delay_seconds": p.p50_delay_seconds,
+            "p90_delay_seconds": p.p90_delay_seconds,
+            "model_version": p.model_version
+        })
+
+    from flask import current_app
+    actions_data = []
+    for a in actions:
+        action_dict = {
+            "action_sequence": a.action_sequence,
+            "action_type": a.action_type,
+            "run_id": a.run_id,
+            "station_code": a.station_code,
+            "connection_id": a.connection_id,
+            "payload": a.action_payload,
+            "explanation": a.explanation,
+            "constraint_violated": a.constraint_violated,
+        }
+        why_obj = {
+            "constraint_violated": "UNKNOWN",
+            "explanation": a.explanation,
+            "evidence_ids": []
+        }
+        if hasattr(current_app, 'map_constraint_to_xai'):
+            try:
+                why_obj = current_app.map_constraint_to_xai(action_dict)
+            except Exception as e:
+                current_app.logger.error(f"Error mapping constraint to XAI: {e}")
+        actions_data.append({
+            "sequence": a.action_sequence,
+            "type": a.action_type,
+            "run_id": a.run_id,
+            "station_code": a.station_code,
+            "connection_id": a.connection_id,
+            "payload": a.action_payload,
+            "explanation": a.explanation,
+            "why": why_obj
+        })
+
     return jsonify({
         "rescheduling_run_id": run.rescheduling_run_id,
         "status": run.status,
@@ -112,17 +167,8 @@ def latest():
         "objective_after": run.objective_after,
         "compute_time_ms": run.compute_time_ms,
         "created_at": run.created_at.isoformat() if run.created_at else None,
-        "actions": [
-            {
-                "sequence": a.action_sequence,
-                "type": a.action_type,
-                "run_id": a.run_id,
-                "station_code": a.station_code,
-                "payload": a.action_payload,
-                "explanation": a.explanation,
-            }
-            for a in actions
-        ],
+        "actions": actions_data,
+        "predictions": predictions_data,
     }), 200
 
 
@@ -165,8 +211,23 @@ def _run_pipeline(
         return _empty_result(snapshot.snapshot_id, "no_runs_in_horizon")
 
     # 2. Delay predictions
-    predictor = HistoricalBaselinePredictor()
+    from predictors.sage_het import SageHetPredictor
+    predictor = SageHetPredictor()
     predictions = predictor.predict(snapshot_json, horizons=[15, 30, 60]) if use_predictions else []
+
+    from models import db, DelayPrediction
+    for p in predictions:
+        dp = DelayPrediction(
+            snapshot_id=snapshot.snapshot_id,
+            run_id=p.run_id,
+            horizon_minutes=p.horizon_minutes,
+            p50_delay_seconds=p.p50_delay_seconds,
+            p90_delay_seconds=p.p90_delay_seconds,
+            model_version=p.model_version
+        )
+        db.session.add(dp)
+    db.session.flush()
+
 
     # 3. Impact zone (falls back to all runs if zone is empty)
     impact_svc = ImpactZoneService()
@@ -174,7 +235,7 @@ def _run_pipeline(
     if not impact_run_ids:
         impact_run_ids = all_run_ids
 
-    predictor_name = HistoricalBaselinePredictor.MODEL_VERSION if use_predictions else "none"
+    predictor_name = predictor.MODEL_VERSION if use_predictions else "none"
 
     # 4. Build alternative graph
     alt_graph = AlternativeGraph.build(
@@ -212,6 +273,17 @@ def _run_pipeline(
     status = "success" if final_result.accepted else "partial"
 
     # 8. Convert arc selections to ActionRecords
+    # Map (run_id, stop_sequence) -> station_code
+    run_stop_to_station = {}
+    for r in snapshot_json.get("runs", []):
+        rid = r.get("run_id")
+        for ev in r.get("events", []):
+            run_stop_to_station[(rid, ev.get("stop_sequence"))] = ev.get("station_code")
+
+    # Query active disrupted stations
+    from models import DisruptionEvent
+    active_disrupted_stations = {d.station_code for d in DisruptionEvent.query.filter_by(is_active=True).all()}
+
     actions: list[ActionRecord] = []
     conflicts: list[ConflictRecord] = []
     seq = 1
@@ -227,6 +299,7 @@ def _run_pipeline(
             action_sequence=seq,
             action_type="set_precedence",
             run_id=first_run,
+            connection_id=pair.edge_id,
             action_payload={
                 "pair_id": pair_id,
                 "direction": direction_str,
@@ -238,6 +311,7 @@ def _run_pipeline(
                 f"Train {first_run[-8:]} ordered before {second_run[-8:]} "
                 f"on edge {pair.edge_id}"
             ),
+            constraint_violated="PRECEDENCE_CONFLICT",
         ))
         seq += 1
 
@@ -255,14 +329,19 @@ def _run_pipeline(
     for (run_id, stop_seq), hold_s in best_plan.holds.items():
         if hold_s <= 0:
             continue
+        st_code = run_stop_to_station.get((run_id, stop_seq))
+        constraint = "BLOCKAGE" if st_code in active_disrupted_stations else "HEADWAY_GAP"
         actions.append(ActionRecord(
             action_sequence=seq,
             action_type="hold",
             run_id=run_id,
+            station_code=st_code,
             action_payload={"stop_sequence": stop_seq, "hold_seconds": hold_s},
             explanation=f"Hold {hold_s:.0f}s at stop {stop_seq}",
+            constraint_violated=constraint,
         ))
         seq += 1
+
 
     # 9. Persist audit
     audit = AuditService()
@@ -279,20 +358,46 @@ def _run_pipeline(
         status=status,
     )
 
+    from flask import current_app
+    actions_data = []
+    for a in actions:
+        action_dict = {
+            "action_sequence": a.action_sequence,
+            "action_type": a.action_type,
+            "run_id": a.run_id,
+            "station_code": a.station_code,
+            "connection_id": a.connection_id,
+            "payload": a.action_payload,
+            "explanation": a.explanation,
+            "constraint_violated": a.constraint_violated,
+        }
+        why_obj = {
+            "constraint_violated": "UNKNOWN",
+            "explanation": a.explanation,
+            "evidence_ids": []
+        }
+        if hasattr(current_app, 'map_constraint_to_xai'):
+            try:
+                why_obj = current_app.map_constraint_to_xai(action_dict)
+            except Exception as e:
+                current_app.logger.error(f"Error mapping constraint to XAI: {e}")
+        actions_data.append({
+            "sequence": a.action_sequence,
+            "type": a.action_type,
+            "run_id": a.run_id,
+            "station_code": a.station_code,
+            "connection_id": a.connection_id,
+            "payload": a.action_payload,
+            "explanation": a.explanation,
+            "why": why_obj
+        })
+
     return {
         "rescheduling_run_id": rr.rescheduling_run_id,
         "status": status,
         "objective_before": objective_before,
         "objective_after": objective_after,
-        "actions": [
-            {
-                "sequence": a.action_sequence,
-                "type": a.action_type,
-                "run_id": a.run_id,
-                "payload": a.action_payload,
-            }
-            for a in actions
-        ],
+        "actions": actions_data,
         "conflicts_detected": len(conflicts),
         "conflicts_resolved": sum(1 for c in conflicts if c.resolved),
     }

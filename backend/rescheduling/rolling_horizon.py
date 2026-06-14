@@ -105,12 +105,27 @@ class RollingHorizonService:
             return None
 
         # ── 2. Predictions ────────────────────────────────────────────────────
-        predictor = HistoricalBaselinePredictor()
+        from predictors.sage_het import SageHetPredictor
+        predictor = SageHetPredictor()
         predictions = (
             predictor.predict(snap_json, horizons=[15, 30, 60])
             if self.use_predictions
             else []
         )
+
+        from models import db, DelayPrediction
+        for p in predictions:
+            dp = DelayPrediction(
+                snapshot_id=snapshot.snapshot_id,
+                run_id=p.run_id,
+                horizon_minutes=p.horizon_minutes,
+                p50_delay_seconds=p.p50_delay_seconds,
+                p90_delay_seconds=p.p90_delay_seconds,
+                model_version=p.model_version
+            )
+            db.session.add(dp)
+        db.session.flush()
+
 
         # ── 3. Impact zone ────────────────────────────────────────────────────
         impact_svc = ImpactZoneService()
@@ -119,7 +134,7 @@ class RollingHorizonService:
             impact_run_ids = all_run_ids
 
         predictor_name = (
-            HistoricalBaselinePredictor.MODEL_VERSION
+            predictor.MODEL_VERSION
             if self.use_predictions
             else "none"
         )
@@ -182,6 +197,17 @@ class RollingHorizonService:
         status = "success" if final_result.accepted else "partial"
 
         # ── 10. Build action/conflict records ─────────────────────────────────
+        # Map (run_id, stop_sequence) -> station_code
+        run_stop_to_station = {}
+        for r in snap_json.get("runs", []):
+            rid = r.get("run_id")
+            for ev in r.get("events", []):
+                run_stop_to_station[(rid, ev.get("stop_sequence"))] = ev.get("station_code")
+
+        # Query active disrupted stations
+        from models import DisruptionEvent
+        active_disrupted_stations = {d.station_code for d in DisruptionEvent.query.filter_by(is_active=True).all()}
+
         actions: list[ActionRecord] = []
         conflicts: list[ConflictRecord] = []
         seq = 1
@@ -197,6 +223,7 @@ class RollingHorizonService:
                 action_sequence=seq,
                 action_type="set_precedence",
                 run_id=first_run,
+                connection_id=pair.edge_id,
                 action_payload={
                     "pair_id": pair_id,
                     "direction": direction_str,
@@ -208,6 +235,7 @@ class RollingHorizonService:
                     f"Train {first_run[-8:]} ordered before {second_run[-8:]} "
                     f"on edge {pair.edge_id}"
                 ),
+                constraint_violated="PRECEDENCE_CONFLICT",
             ))
             conflicts.append(ConflictRecord(
                 first_run_id=pair.run_i,
@@ -222,14 +250,19 @@ class RollingHorizonService:
         for (run_id, stop_seq), hold_s in best_plan.holds.items():
             if hold_s <= 0:
                 continue
+            st_code = run_stop_to_station.get((run_id, stop_seq))
+            constraint = "BLOCKAGE" if st_code in active_disrupted_stations else "HEADWAY_GAP"
             actions.append(ActionRecord(
                 action_sequence=seq,
                 action_type="hold",
                 run_id=run_id,
+                station_code=st_code,
                 action_payload={"stop_sequence": stop_seq, "hold_seconds": hold_s},
                 explanation=f"Hold {hold_s:.0f}s at stop {stop_seq}",
+                constraint_violated=constraint,
             ))
             seq += 1
+
 
         # ── 11. Persist audit ─────────────────────────────────────────────────
         audit = AuditService()

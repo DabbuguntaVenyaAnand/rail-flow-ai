@@ -35,6 +35,7 @@ export const NetworkProvider = ({ children }) => {
   const [ripplePrediction, setRipplePrediction] = useState(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [latestRescheduling, setLatestRescheduling] = useState(null);
 
   const adjacencyRef = useRef(new Map());
 
@@ -65,11 +66,26 @@ export const NetworkProvider = ({ children }) => {
     }
   }, []);
 
+  const fetchLatestRescheduling = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/v1/rescheduling/latest`);
+      if (res.ok) {
+        const data = await res.json();
+        setLatestRescheduling(data);
+        return data;
+      }
+    } catch (err) {
+      console.error('Failed to fetch latest rescheduling run:', err);
+    }
+    return null;
+  }, []);
+
   useEffect(() => {
     const init = async () => {
       try {
         await fetchGraph();
         await fetchTrains();
+        await fetchLatestRescheduling();
       } catch (err) {
         console.error('Failed to fetch network data:', err);
         setError(err.message || 'Failed to connect to backend server');
@@ -78,7 +94,7 @@ export const NetworkProvider = ({ children }) => {
       }
     };
     init();
-  }, [fetchGraph, fetchTrains]);
+  }, [fetchGraph, fetchTrains, fetchLatestRescheduling]);
 
   // Real-time train status polling
   useEffect(() => {
@@ -127,13 +143,14 @@ export const NetworkProvider = ({ children }) => {
 
       // Refresh graph statuses from server
       await fetchGraph();
+      await fetchLatestRescheduling();
       bumpDisruption();
 
       return { ok: true, station: body.updated };
     } catch (err) {
       return { ok: false, error: err.message };
     }
-  }, [propagationDepth, fetchGraph, bumpDisruption]);
+  }, [propagationDepth, fetchGraph, bumpDisruption, fetchLatestRescheduling]);
 
   const clearDisruptions = useCallback(async () => {
     const ids = [...delayedNodes];
@@ -149,8 +166,9 @@ export const NetworkProvider = ({ children }) => {
     setImpactHopMap({});
     setRipplePrediction(null);
     await fetchGraph();
+    await fetchLatestRescheduling();
     bumpDisruption();
-  }, [delayedNodes, fetchGraph, bumpDisruption]);
+  }, [delayedNodes, fetchGraph, bumpDisruption, fetchLatestRescheduling]);
 
   /** Station lookup with report generation. */
   const searchStation = useCallback(async (code) => {
@@ -248,6 +266,8 @@ export const NetworkProvider = ({ children }) => {
     searchLoading,
     ripplePrediction,
     fetchRipplePrediction,
+    latestRescheduling,
+    fetchLatestRescheduling,
   };
 
   return (

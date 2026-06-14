@@ -13,6 +13,7 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum, auto
 from typing import Any, Optional
 
 
@@ -21,6 +22,11 @@ from typing import Any, Optional
 # ─────────────────────────────────────────────────────────────────────────────
 
 SOURCE = "__SOURCE__"   # source node; t_SOURCE = t0
+
+
+class ArcType(Enum):
+    SEGMENT = auto()   # running-segment ordering constraint (entry→exit + headway)
+    PLATFORM = auto()  # platform dwell conflict arc (arrival→departure interval)
 
 
 @dataclass(frozen=True, order=True)
@@ -40,6 +46,7 @@ class Arc:
     src: Any            # EventNode or SOURCE
     dst: EventNode
     weight: float       # seconds
+    arc_type: ArcType = ArcType.SEGMENT
 
 
 @dataclass
@@ -62,6 +69,7 @@ class AltPair:
     arr_stop_j: int
     fwd: Arc
     bwd: Arc
+    is_bidirectional_conflict: bool = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -310,6 +318,15 @@ class AlternativeGraph:
                     ):
                         continue
 
+                    # Bidirectional single-track: opposing trains need mutual
+                    # exclusion (full clearance time), not just minimum headway.
+                    dir_i = 1 if arr_i > dep_i else -1
+                    dir_j = 1 if arr_j > dep_j else -1
+                    is_bidir = (dir_i != dir_j)
+                    arc_weight = (
+                        h_min + _get_base_run_seconds(edge_id) if is_bidir else h_min
+                    )
+
                     pair_id = str(uuid.uuid4())
                     pair = AltPair(
                         pair_id=pair_id,
@@ -320,8 +337,9 @@ class AlternativeGraph:
                         run_j=run_j,
                         dep_stop_j=dep_j,
                         arr_stop_j=arr_j,
-                        fwd=Arc(fwd_src, fwd_dst, h_min),
-                        bwd=Arc(bwd_src, bwd_dst, h_min),
+                        fwd=Arc(fwd_src, fwd_dst, arc_weight, ArcType.SEGMENT),
+                        bwd=Arc(bwd_src, bwd_dst, arc_weight, ArcType.SEGMENT),
+                        is_bidirectional_conflict=is_bidir,
                     )
                     g.alt_pairs[pair_id] = pair
                     g.selections[pair_id] = None
@@ -367,4 +385,15 @@ def _get_headway(edge_id: int) -> float:
     edge = db.session.get(CorridorEdge, edge_id)
     if edge and edge.min_headway_seconds:
         return float(edge.min_headway_seconds)
+    return AlternativeGraph.DEFAULT_HEADWAY_S
+
+
+def _get_base_run_seconds(edge_id: int) -> float:
+    """Return base_run_seconds for an edge (full segment traversal time)."""
+    from models import CorridorEdge, db
+    edge = db.session.get(CorridorEdge, edge_id)
+    if edge and edge.base_run_seconds:
+        return float(edge.base_run_seconds)
+    if edge and edge.base_time_min:
+        return float(edge.base_time_min) * 60.0
     return AlternativeGraph.DEFAULT_HEADWAY_S

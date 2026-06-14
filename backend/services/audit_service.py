@@ -38,6 +38,7 @@ class ActionRecord:
     connection_id: Optional[int] = None
     action_payload: dict = field(default_factory=dict)
     explanation: str = ""
+    constraint_violated: Optional[str] = None
 
 
 @dataclass
@@ -133,6 +134,7 @@ class AuditService:
                 connection_id=rec.connection_id,
                 action_payload=rec.action_payload,
                 explanation=rec.explanation,
+                constraint_violated=rec.constraint_violated,
             )
             db.session.add(action)
             db.session.flush()

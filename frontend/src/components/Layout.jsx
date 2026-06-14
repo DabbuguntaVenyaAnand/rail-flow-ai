@@ -5,9 +5,11 @@ import { useNetwork } from '../context/NetworkContext';
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: '◉' },
   { to: '/ops', label: 'Operations', icon: '▣' },
-  { to: '/pathfinder', label: 'Pathfinder', icon: '◎' },
   { to: '/analytics', label: 'Analytics', icon: '◈' },
 ];
+
+
+
 
 const HEALTH_BADGE = {
   healthy: { label: 'Healthy', className: 'health-healthy' },

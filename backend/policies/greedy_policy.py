@@ -3,10 +3,10 @@ policies/greedy_policy.py — Rail-Flow AI
 
 GreedyPolicy — Algorithm 4 from the HSR-RailFlow report.
 
-Resolves alternative arc pairs one at a time in earliest-scheduled-event order.
+Resolves alternative arc pairs one at a time in descending impact-score order.
 For each pair, tries both directions through FeasibilityShield and picks the
-direction with the lower lower-bound.  Falls back to HoldFallback when both
-directions fail.
+direction with the lower lower-bound; on ties (within 1 s) picks the direction
+with less added hold time.  Falls back to HoldFallback when both directions fail.
 """
 
 from __future__ import annotations
@@ -69,21 +69,26 @@ class GreedyPolicy:
             if time.monotonic() > deadline:
                 break
 
-            pair = _earliest_pair(unresolved, g)
+            pair = _highest_impact_pair(unresolved, g)
 
-            best_graph: Optional[AlternativeGraph] = None
-            best_lb = float("inf")
-
+            # Try both directions; collect (direction, graph, lower_bound)
+            cands: list[tuple[int, AlternativeGraph, float]] = []
             for direction in (0, 1):
                 candidate = g.copy()
                 candidate.select_arc(pair.pair_id, direction)
                 result = self.shield.validate_partial(candidate)
-                if result.accepted and result.lower_bound < best_lb:
-                    best_lb = result.lower_bound
-                    best_graph = candidate
+                if result.accepted:
+                    cands.append((direction, candidate, result.lower_bound))
 
-            if best_graph is not None:
-                g = best_graph
+            if cands:
+                cands.sort(key=lambda x: x[2])
+                # Tie-break: when both LBs are within 1 s, pick min added hold
+                if len(cands) == 2 and abs(cands[0][2] - cands[1][2]) < 1.0:
+                    h0 = _hold_added(cands[0][0], pair, g, self.shield)
+                    h1 = _hold_added(cands[1][0], pair, g, self.shield)
+                    g = cands[0][1] if h0 <= h1 else cands[1][1]
+                else:
+                    g = cands[0][1]
             else:
                 # Both directions failed — apply hold and try again
                 g = self.fallback.apply(g, pair)
@@ -120,3 +125,46 @@ def _earliest_pair(pairs: list[AltPair], g: AlternativeGraph) -> AltPair:
         return min(t_i, t_j)
 
     return min(pairs, key=_min_sched)
+
+
+def _impact_score(pair: AltPair, g: AlternativeGraph) -> int:
+    """Count downstream trains whose DEP is scheduled after both trains in this pair."""
+    later_dep = max(
+        g.scheduled_times.get(EventNode(pair.run_i, pair.dep_stop_i, "DEP"), 0.0),
+        g.scheduled_times.get(EventNode(pair.run_j, pair.dep_stop_j, "DEP"), 0.0),
+    )
+    return sum(
+        1
+        for n, t in g.scheduled_times.items()
+        if n.kind == "DEP"
+        and t > later_dep
+        and n.run_id not in (pair.run_i, pair.run_j)
+    )
+
+
+def _highest_impact_pair(pairs: list[AltPair], g: AlternativeGraph) -> AltPair:
+    """Return the pair with the highest downstream impact score."""
+    return max(pairs, key=lambda p: _impact_score(p, g))
+
+
+def _hold_added(
+    direction: int,
+    pair: AltPair,
+    g: AlternativeGraph,
+    shield,
+) -> float:
+    """Return total added hold seconds across both trains when arc is selected."""
+    candidate = g.copy()
+    candidate.select_arc(pair.pair_id, direction)
+    result = shield.validate_partial(candidate)
+    if not result.accepted:
+        return float("inf")
+    total = 0.0
+    for node in (
+        EventNode(pair.run_i, pair.dep_stop_i, "DEP"),
+        EventNode(pair.run_j, pair.dep_stop_j, "DEP"),
+    ):
+        sched = g.scheduled_times.get(node, 0.0)
+        actual = result.event_times.get(node, sched)
+        total += max(0.0, actual - sched)
+    return total

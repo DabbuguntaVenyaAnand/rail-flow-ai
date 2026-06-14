@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useNetwork } from '../context/NetworkContext';
 import { STATUS_COLORS, DISRUPTION_COLORS } from '../constants/colors';
 
@@ -14,6 +15,7 @@ function getRipplePercent(prediction) {
 }
 
 export default function DisruptionPanel() {
+  const navigate = useNavigate();
   const {
     injectDelay,
     clearDisruptions,
@@ -47,6 +49,7 @@ export default function DisruptionPanel() {
     }
     setInjecting(false);
   };
+
 
   const handlePredict = async () => {
     if (!injectTarget.trim()) return;

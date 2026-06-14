@@ -449,6 +449,7 @@ class ReschedulingAction(db.Model):
     connection_id       = db.Column(db.Integer,   db.ForeignKey("station_connections.connection_id"), nullable=True)
     action_payload      = db.Column(db.JSON,       nullable=False, default=dict)
     explanation         = db.Column(db.Text,       nullable=False, default="")
+    constraint_violated = db.Column(db.String(64), nullable=True)
 
     __table_args__ = (
         db.UniqueConstraint("rescheduling_run_id", "action_sequence",
@@ -459,15 +460,17 @@ class ReschedulingAction(db.Model):
 
     def to_dict(self):
         return {
-            "action_id":       self.action_id,
-            "action_sequence": self.action_sequence,
-            "action_type":     self.action_type,
-            "run_id":          self.run_id,
-            "station_code":    self.station_code,
-            "connection_id":   self.connection_id,
-            "payload":         self.action_payload,
-            "explanation":     self.explanation,
+            "action_id":           self.action_id,
+            "action_sequence":     self.action_sequence,
+            "action_type":         self.action_type,
+            "run_id":              self.run_id,
+            "station_code":        self.station_code,
+            "connection_id":       self.connection_id,
+            "payload":             self.action_payload,
+            "explanation":         self.explanation,
+            "constraint_violated": self.constraint_violated,
         }
+
 
 
 class DetectedConflict(db.Model):

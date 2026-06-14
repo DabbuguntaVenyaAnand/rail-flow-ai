@@ -691,3 +691,102 @@ body {
   .analytics-kpis { grid-template-columns: repeat(2, 1fr); }
   .app-header { flex-wrap: wrap; height: auto; padding: 12px; }
 }
+
+/* ── Premium Pathfinder & Rerouting Timeline ── */
+.timeline-stops {
+  position: relative;
+  padding-left: 24px;
+  margin: 16px 0 8px 8px;
+  border-left: 2px dashed rgba(226, 232, 240, 0.15);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.timeline-item {
+  position: relative;
+  padding-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: -29px;
+  top: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  border: 2px solid var(--bg-panel);
+  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.15);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.timeline-item.status-clear::before { 
+  background: var(--success); 
+  box-shadow: 0 0 8px var(--success), 0 0 0 2px rgba(34, 197, 94, 0.15); 
+}
+.timeline-item.status-congestion::before { 
+  background: var(--yellow); 
+  box-shadow: 0 0 8px var(--yellow), 0 0 0 2px rgba(234, 179, 8, 0.15); 
+}
+.timeline-item.status-delayed::before { 
+  background: var(--danger); 
+  box-shadow: 0 0 8px var(--danger), 0 0 0 2px rgba(239, 68, 68, 0.15); 
+}
+
+.timeline-item:last-child {
+  padding-bottom: 0;
+  border-left-color: transparent;
+}
+
+.detour-glow-card {
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.08) 0%, rgba(239, 68, 68, 0.05) 100%);
+  border: 1px solid rgba(249, 115, 22, 0.25);
+  border-radius: 10px;
+  padding: 14px;
+  margin: 16px 0;
+  box-shadow: 0 4px 24px rgba(249, 115, 22, 0.05);
+  backdrop-filter: blur(4px);
+  animation: pulseGlow 3s infinite alternate;
+}
+
+@keyframes pulseGlow {
+  0% { 
+    box-shadow: 0 4px 16px rgba(249, 115, 22, 0.03); 
+    border-color: rgba(249, 115, 22, 0.2);
+  }
+  100% { 
+    box-shadow: 0 8px 24px rgba(249, 115, 22, 0.12); 
+    border-color: rgba(249, 115, 22, 0.4);
+  }
+}
+
+.xai-item-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #111827;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.xai-item-card:hover {
+  background: var(--bg-elevated);
+  transform: translateX(4px);
+  border-color: var(--accent);
+}
+
+.xai-item-card.active {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.2);
+}
+
