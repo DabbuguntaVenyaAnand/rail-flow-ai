@@ -26,10 +26,6 @@ Thumbs.db
 # Frontend production builds
 frontend/build/
 
-# Database dumps
-dump-rail_digital_twin-202606132123.sql
-dump-*.sql
-
 # Temporary workspace scripts & folders
 scratch/
 far/
@@ -48,3 +44,6 @@ far/
 *.suo
 *.user
 *.sln
+
+# Generated Reports
+HACKATHON_PROJECT_REPORT.html
