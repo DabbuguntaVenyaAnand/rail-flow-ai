@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import Pathfinder from './pages/Pathfinder';
 import Operations from './pages/Operations';
 import Analytics from './pages/Analytics';
+import Rescheduling from './pages/Rescheduling';
 import './styles/app.css';
 
 export default function App() {
@@ -18,6 +19,7 @@ export default function App() {
             <Route path="/pathfinder" element={<Pathfinder />} />
             <Route path="/ops" element={<Operations />} />
             <Route path="/analytics" element={<Analytics />} />
+            <Route path="/reschedule" element={<Rescheduling />} />
           </Routes>
         </Layout>
       </BrowserRouter>

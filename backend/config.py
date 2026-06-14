@@ -42,15 +42,17 @@ class Config:
     POLICY_BACKEND = os.environ.get("POLICY_BACKEND", "beam_search")
 
     # ── Beam-search parameters ────────────────────────────────────────────
-    BEAM_WIDTH = int(os.environ.get("BEAM_WIDTH", 8))
-    MAX_POLICY_EXPANSIONS = int(os.environ.get("MAX_POLICY_EXPANSIONS", 500))
-    POLICY_TIME_LIMIT_MS = int(os.environ.get("POLICY_TIME_LIMIT_MS", 1000))
+    BEAM_WIDTH = int(os.environ.get("BEAM_WIDTH", 20))
+    MAX_POLICY_EXPANSIONS = int(os.environ.get("MAX_POLICY_EXPANSIONS", 200))
+    POLICY_TIME_LIMIT_MS = int(os.environ.get("POLICY_TIME_LIMIT_MS", 800))
     LOCAL_SEARCH_TIME_LIMIT_MS = int(os.environ.get("LOCAL_SEARCH_TIME_LIMIT_MS", 1000))
 
     # ── Scenario / uncertainty parameters ────────────────────────────────
     SCENARIO_COUNT = int(os.environ.get("SCENARIO_COUNT", 16))
     RISK_ALPHA = float(os.environ.get("RISK_ALPHA", 0.90))
     RISK_WEIGHT = float(os.environ.get("RISK_WEIGHT", 0.25))
+    # Gate K-scenario CVaR; requires historical residual data to be meaningful.
+    SCENARIO_EVALUATION_ENABLED = os.environ.get("SCENARIO_EVALUATION_ENABLED", "false").lower() == "true"
 
     # ── Feature flags ────────────────────────────────────────────────────
     ENABLE_LOCAL_REROUTE = os.environ.get("ENABLE_LOCAL_REROUTE", "false").lower() == "true"

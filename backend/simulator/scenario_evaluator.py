@@ -78,10 +78,21 @@ class ScenarioEvaluator:
         """
         Compute J_risk for a CandidatePlan.
 
+        When SCENARIO_EVALUATION_ENABLED is False (default), returns J_det
+        directly — no K-scenario CVaR is computed. Set the flag to True only
+        when a populated ResidualModel with historical data is available.
+
         :param plan: :class:`~rescheduling.local_search.CandidatePlan`.
         :param horizon_minutes: Horizon used to look up residuals.
         :returns: J_risk scalar (lower is better).
         """
+        # Check feature flag; default off when no historical residual data exists
+        try:
+            from flask import current_app
+            scenario_enabled = current_app.config.get("SCENARIO_EVALUATION_ENABLED", False)
+        except RuntimeError:
+            scenario_enabled = False
+
         base_delays = self._terminal_delays_from_plan(plan)
 
         n_chg = sum(1 for v in plan.holds.values() if v > 0)
@@ -94,6 +105,9 @@ class ScenarioEvaluator:
             H_add=h_add,
         )
         j_det = self.obj_fn.score(base_metrics)
+
+        if not scenario_enabled:
+            return j_det
 
         scenario_scores = self._run_scenarios(
             base_delays, base_metrics, horizon_minutes

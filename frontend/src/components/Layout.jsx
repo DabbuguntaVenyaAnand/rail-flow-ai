@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { to: '/ops', label: 'Operations', icon: '▣' },
   { to: '/pathfinder', label: 'Pathfinder', icon: '◎' },
   { to: '/analytics', label: 'Analytics', icon: '◈' },
+  { to: '/reschedule', label: 'Reschedule', icon: '⟳' },
 ];
 
 const HEALTH_BADGE = {

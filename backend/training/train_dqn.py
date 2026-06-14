@@ -64,6 +64,8 @@ def main() -> None:
         print("    pip install 'gymnasium>=0.29.0'")
         sys.exit(1)
 
+    import numpy as np  # noqa: E402
+
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     from policies.dqn_policy import (
