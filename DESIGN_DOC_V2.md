@@ -26,7 +26,7 @@ Rail-Flow AI is a production-grade train-rescheduling engine for High-Speed Rail
 | 2 | P0 | `corridor_edges` missing capacity/direction columns | **Already Correct** — added in Phase 1 |
 | 3 | P1 | `LB(z')` undefined | **Already Correct** — implemented as longest-path score in `FeasibilityShield.validate_partial()` |
 | 4 | P1 | `MaterializeOccupancies` undefined | **Already Correct** — `OccupancyModel.build_from_events()` in `simulator/occupancy.py` |
-| 5 | P1 | Warm start reuses arc weights (cascade errors) | **Already Correct** — `arc_selection()` returns `dict[str, int]` (directions only); weights recomputed from fresh snapshot in each `AlternativeGraph.build()` |
+| 5 | P1 |  Warm start reuses arc weights (cascade errors) | **Already Correct** — `arc_selection()` returns `dict[str, int]` (directions only); weights recomputed from fresh snapshot in each `AlternativeGraph.build()` |
 | 6 | P1 | Arc types wrong for platform conflicts | **Fixed** — `ArcType.SEGMENT` / `ArcType.PLATFORM` enum added to `alternative_graph.py` |
 | 7 | P1 | Bidirectional single-track uses headway for opposing trains | **Fixed** — opposing trains get `arc_weight = h_min + base_run_seconds` (mutual exclusion) |
 | 8 | P2 | Greedy tie-break preserves disrupted order | **Fixed** — hold-time tie-breaking via `_hold_added()` in `greedy_policy.py` |
