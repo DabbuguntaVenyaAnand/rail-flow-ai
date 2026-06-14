@@ -49,9 +49,8 @@ graph TD
 * **Quantile Delay Regression**: Regresses Dual SoftPlus output heads yielding `p50` (expected) and `p90` (worst-case) delay predictions in hours.
 * **Fully Trained**: Trained directly on database timetable events actuals to yield highly accurate and realistic delay forecasts (e.g. ~43 minutes cascade).
 
-### 🔍 "Glass Box" Explainable AI (XAI)
-* **Visual Traces**: Categorizes rescheduling actions into badges (`PRECEDENCE_CONFLICT`, `BLOCKAGE`, `HEADWAY_GAP`).
-* **Camera Focus & Animations**: Clicking an XAI card dims unrelated graph components, highlights the affected corridor in high-visibility **Amber**, and flashes the conflict node in a **Red Pulse** at 2Hz.
+### 🔍 Rule-Based Decision Logs:
+Translates mathematical scheduling choices into human-readable, templated action cards linking dispatching steps directly to GNN predictions.
 
 ---
 
