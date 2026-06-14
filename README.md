@@ -6,7 +6,7 @@
 [![Node Version](https://img.shields.io/badge/Node-18%2B-purple.svg?style=for-the-badge)](#)
 [![ML Framework](https://img.shields.io/badge/PyTorch-2.3%2B-orange.svg?style=for-the-badge)](#)
 
-A high-performance, real-time **Digital Twin Control Tower** simulating and optimizing train scheduling conflicts across a 781-station Indian Railways network segment. Built around the advanced **HSR-RailFlow Rescheduling Engine**, the system utilizes heterogeneous Graph Neural Networks (GNNs), a 6-stage Feasibility Shield, Conditional Value at Risk (CVaR) risk scoring, and Explainable AI (XAI) overlays.
+A high-performance, real-time **Digital Twin Control Tower** simulating and optimizing train scheduling conflicts across a 4,455-station Indian Railways network segment. Built around the advanced **HSR-RailFlow Rescheduling Engine**, the system utilizes heterogeneous Graph Neural Networks (GNNs), a 6-stage Feasibility Shield, Conditional Value at Risk (CVaR) risk scoring, and Explainable AI (XAI) overlays.
 
 ---
 
@@ -33,7 +33,7 @@ graph TD
 ## ⚡ Core High-Impact Features
 
 ### 📍 Interactive Cytoscape Digital Twin
-* **Force-Directed Layout**: Renders 781 backbone stations with smooth zoom, pan, and real-time status markers (`clear`, `congestion`, `delayed`).
+* **Force-Directed Layout**: Renders 464 core backbone stations with smooth zoom, pan, and real-time status markers (`clear`, `congestion`, `delayed`).
 * **Bypass A\* Pathfinder**: Computes the shortest travel times dynamically. If a corridor is disrupted, it automatically calculates and visualizes a bypass detour.
 
 ### 🛡️ HSR-RailFlow Rescheduling Engine
