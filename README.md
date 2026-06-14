@@ -190,3 +190,15 @@ pytest tests/ -v
 * **`GET /api/stations`** — Retrieves all stations. Filter via `?layer=hub`.
 * **`GET /api/path?from=X&to=Y`** — A* shortest path with dynamic detour bypasses.
 * **`POST /api/disruption/inject`** — Inject active congestion or delay blockages at any station.
+
+---
+
+## 👥 Team & Submission Details
+
+* **Hackathon**: [FAR AWAY Hackathon](https://zuup.dev) (Hosted by Zuup)
+* **Round**: Round 1 — Online Build Round
+* **Team Name**: `notreallysure`
+* **Team Members**:
+  * 👤 **Swetha Nomula Nomula**
+  * 👤 **Venya**
+  * 👤 **Neelotpala**
