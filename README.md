@@ -8,6 +8,8 @@
 
 A high-performance, real-time **Digital Twin Control Tower** simulating and optimizing train scheduling conflicts across a 4,455-station Indian Railways network segment. Built around the advanced **HSR-RailFlow Rescheduling Engine**, the system utilizes heterogeneous Graph Neural Networks (GNNs), a 6-stage Feasibility Shield, Conditional Value at Risk (CVaR) risk scoring, and Explainable AI (XAI) overlays.
 
+
+LINK TO WEBSITE : http://3.82.208.252/ 
 ---
 
 ## 🏗️ System Architecture & Optimization Pipeline
